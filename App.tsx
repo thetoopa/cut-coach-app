@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { SafeAreaView, ScrollView, View, Text, TextInput, Pressable, StyleSheet, Alert } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StatusBar } from 'expo-status-bar';
+import { CalendarView } from './src/components/CalendarView';
+import { DayDetailModal } from './src/components/DayDetailModal';
 
 type Tab = 'Today' | 'Meals' | 'Workout' | 'Cardio' | 'Profile';
 type Meal = { id: string; name: string; type: 'Breakfast'|'Lunch'|'Dinner'|'Snack'; calories: number; protein: number; carbs: number; fat: number; notes: string };
@@ -80,9 +82,12 @@ export default function App(){
   const [workouts,setWorkouts]=useState<WorkoutDay[]>(baseWorkouts);
   const [selectedWorkout,setSelectedWorkout]=useState(0);
   const [rest,setRest]=useState(0);
+  const [dayLogs, setDayLogs] = useState<Record<string, DayLog>>({});
+  const [selectedDateForModal, setSelectedDateForModal] = useState<string>('');
+  const [showDayModal, setShowDayModal] = useState(false);
 
-  useEffect(()=>{(async()=>{ const raw=await AsyncStorage.getItem('cutCoach'); if(raw){ const v=JSON.parse(raw); setProfile(v.profile??defaultProfile); setLog(v.log?.date===todayKey()?v.log:{...log,date:todayKey()}); setWorkouts(v.workouts??baseWorkouts);} })()},[]);
-  useEffect(()=>{ AsyncStorage.setItem('cutCoach', JSON.stringify({profile,log,workouts})); },[profile,log,workouts]);
+  useEffect(()=>{(async()=>{ const raw=await AsyncStorage.getItem('cutCoach'); if(raw){ const v=JSON.parse(raw); setProfile(v.profile??defaultProfile); setLog(v.log?.date===todayKey()?v.log:{...log,date:todayKey()}); setWorkouts(v.workouts??baseWorkouts); setDayLogs(v.dayLogs??{}); } })()},[]);
+  useEffect(()=>{ AsyncStorage.setItem('cutCoach', JSON.stringify({profile,log,workouts,dayLogs})); },[profile,log,workouts,dayLogs]);
   useEffect(()=>{ if(rest<=0) return; const t=setInterval(()=>setRest(r=>Math.max(0,r-1)),1000); return ()=>clearInterval(t)},[rest]);
 
   const picked = meals.filter(m=>log.selectedMeals.includes(m.id));
@@ -97,10 +102,48 @@ export default function App(){
   function updateExercise(wi:number, ei:number, patch:Partial<Exercise>){ setWorkouts(ws=>ws.map((w,i)=> i!==wi?w:{...w, exercises:w.exercises.map((e,j)=>j!==ei?e:{...e,...patch})})); }
   function progressionText(e:Exercise){ const complete=e.lastReps.length===e.sets && e.lastReps.every(r=>r>=e.maxReps); if(complete) return `Next time: increase ${e.name} by ${e.name.toLowerCase().includes('squat')||e.name.toLowerCase().includes('deadlift')||e.name.toLowerCase().includes('leg') ? '10 lb' : '5 lb'}.`; return `Stay at this weight until all ${e.sets} sets hit ${e.maxReps}.`; }
 
+  // Update today's log macros whenever meals change
+  useEffect(() => {
+    setLog(l => ({...l, calories: mealCals, protein: mealProtein}));
+  }, [mealCals, mealProtein]);
+
+  // Handle day modal open
+  const handleDayPress = (dateKey: string) => {
+    setSelectedDateForModal(dateKey);
+    setShowDayModal(true);
+  };
+
+  // Handle day modal save
+  const handleSaveDayLog = (updatedLog: DayLog) => {
+    setDayLogs(logs => ({...logs, [updatedLog.date]: updatedLog}));
+    if (updatedLog.date === todayKey()) {
+      setLog(updatedLog);
+    }
+  };
+
+  // Get current modal log
+  const currentModalLog = selectedDateForModal ? (dayLogs[selectedDateForModal] || {
+    date: selectedDateForModal,
+    calories: 0,
+    protein: 0,
+    steps: 0,
+    outdoorWalk: 0,
+    inclineWalk: 0,
+    golf: false,
+    drinking: false,
+    drinks: 0,
+    workoutDone: false,
+    selectedMeals: [],
+    notes: ''
+  }) : null;
+
   return <SafeAreaView style={s.app}><StatusBar style="light"/><View style={s.header}><Text style={s.title}>Cut Coach</Text><Text style={s.sub}>Lean, athletic cut tracker</Text></View>
     <View style={s.tabs}>{(['Today','Meals','Workout','Cardio','Profile'] as Tab[]).map(t=><Pill key={t} active={tab===t} onPress={()=>setTab(t)}>{t}</Pill>)}</View>
     <ScrollView contentContainerStyle={{padding:16,paddingBottom:40}}>
       {tab==='Today' && <>
+        <Section title="📅 Calendar & Logging">
+          <CalendarView dayLogs={dayLogs} profile={profile} onDayPress={handleDayPress} />
+        </Section>
         <Section title="Today Snapshot">
           <View style={s.grid}><Metric label="Calories left" value={caloriesLeft}/><Metric label="Protein left" value={Math.max(0,proteinLeft)}/><Metric label="Cardio min left" value={Math.max(0,cardioTarget-log.outdoorWalk-log.inclineWalk)}/><Metric label="Alcohol cals" value={alcoholCals}/></View>
           <Text style={s.note}>Target: {calorieGoal} calories / {profile.proteinGoal}g protein. Drinking mode reserves about 115 calories per drink.</Text>
@@ -149,6 +192,15 @@ export default function App(){
         </Section>
       </>}
     </ScrollView>
+    <DayDetailModal
+      visible={showDayModal}
+      dateKey={selectedDateForModal}
+      dayLog={currentModalLog || {date: '', calories: 0, protein: 0, steps: 0, outdoorWalk: 0, inclineWalk: 0, golf: false, drinking: false, drinks: 0, workoutDone: false, selectedMeals: [], notes: ''}}
+      profile={profile}
+      onClose={() => setShowDayModal(false)}
+      onSave={handleSaveDayLog}
+      allMeals={meals}
+    />
   </SafeAreaView>
 }
 

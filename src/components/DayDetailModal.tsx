@@ -1,0 +1,512 @@
+// src/components/DayDetailModal.tsx
+import React, { useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  Modal,
+  ScrollView,
+  Pressable,
+  TextInput,
+  SafeAreaView,
+  Dimensions,
+} from 'react-native';
+import { MaterialIcons } from '@expo/vector-icons';
+import { getDayStatus, ColorMap } from '../utils/colorScheme';
+import { getDateString, getDayOfWeekShort } from '../utils/dateHelpers';
+import { SoundManager, ConfettiEffect } from '../utils/soundAndHaptics';
+
+interface DayDetailModalProps {
+  visible: boolean;
+  dateKey: string;
+  dayLog: any;
+  profile: any;
+  onClose: () => void;
+  onSave: (dayLog: any) => void;
+  allMeals: any[];
+}
+
+export function DayDetailModal({
+  visible,
+  dateKey,
+  dayLog,
+  profile,
+  onClose,
+  onSave,
+  allMeals,
+}: DayDetailModalProps) {
+  const [editLog, setEditLog] = useState(dayLog);
+  const [showConfetti, setShowConfetti] = useState(false);
+
+  const status = getDayStatus(editLog, profile);
+  const selected = allMeals.filter((m) => editLog.selectedMeals?.includes(m.id)) ?? [];
+  const mealCals = selected.reduce((a: number, m: any) => a + m.calories, 0);
+  const mealProtein = selected.reduce((a: number, m: any) => a + m.protein, 0);
+
+  const handleSave = () => {
+    onSave(editLog);
+    SoundManager.playSuccess();
+    setShowConfetti(true);
+    setTimeout(() => {
+      setShowConfetti(false);
+      onClose();
+    }, 800);
+  };
+
+  const toggleMeal = (mealId: string) => {
+    setEditLog((log: any) => ({
+      ...log,
+      selectedMeals: log.selectedMeals.includes(mealId)
+        ? log.selectedMeals.filter((id: string) => id !== mealId)
+        : [...log.selectedMeals, mealId],
+    }));
+  };
+
+  return (
+    <Modal visible={visible} animationType="slide">
+      <SafeAreaView style={styles.container}>
+        {/* Header */}
+        <View style={styles.header}>
+          <Pressable onPress={onClose} style={styles.closeButton}>
+            <MaterialIcons name="close" size={24} color="#fff" />
+          </Pressable>
+          <View>
+            <Text style={styles.dayOfWeek}>{getDayOfWeekShort(dateKey)}</Text>
+            <Text style={styles.dateText}>{getDateString(dateKey)}</Text>
+          </View>
+          <View
+            style={[
+              styles.statusBadge,
+              { backgroundColor: ColorMap[status.status] },
+            ]}
+          >
+            <Text style={styles.statusText}>{status.reason}</Text>
+          </View>
+        </View>
+
+        <ScrollView contentContainerStyle={styles.scrollContent}>
+          {/* Macro Summary */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>📊 Macros</Text>
+            <View style={styles.macroRow}>
+              <View style={styles.macroBox}>
+                <Text style={styles.macroLabel}>Calories</Text>
+                <Text style={styles.macroValue}>{mealCals}</Text>
+                <Text style={styles.macroGoal}>/ {profile.calorieGoal}</Text>
+              </View>
+              <View style={styles.macroBox}>
+                <Text style={styles.macroLabel}>Protein</Text>
+                <Text style={styles.macroValue}>{mealProtein}g</Text>
+                <Text style={styles.macroGoal}>/ {profile.proteinGoal}g</Text>
+              </View>
+              <View style={styles.macroBox}>
+                <Text style={styles.macroLabel}>Remaining</Text>
+                <Text style={styles.macroValue}>
+                  {Math.max(0, profile.calorieGoal - mealCals)}
+                </Text>
+                <Text style={styles.macroGoal}>cals left</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Logging Section */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>⚖️ Quick Log</Text>
+            <InputField
+              label="Morning weight"
+              value={String(editLog.weight ?? '')}
+              onChange={(v) =>
+                setEditLog((log: any) => ({
+                  ...log,
+                  weight: v === '' ? undefined : parseFloat(v),
+                }))
+              }
+            />
+            <InputField
+              label="Steps"
+              value={String(editLog.steps ?? 0)}
+              onChange={(v) =>
+                setEditLog((log: any) => ({ ...log, steps: parseInt(v) || 0 }))
+              }
+            />
+            <InputField
+              label="Outdoor walk (min)"
+              value={String(editLog.outdoorWalk ?? 0)}
+              onChange={(v) =>
+                setEditLog((log: any) => ({ ...log, outdoorWalk: parseInt(v) || 0 }))
+              }
+            />
+            <InputField
+              label="Incline walk (min)"
+              value={String(editLog.inclineWalk ?? 0)}
+              onChange={(v) =>
+                setEditLog((log: any) => ({
+                  ...log,
+                  inclineWalk: parseInt(v) || 0,
+                }))
+              }
+            />
+          </View>
+
+          {/* Activity Toggles */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>✓ Activities</Text>
+            <ToggleButton
+              label="Workout completed"
+              active={editLog.workoutDone ?? false}
+              onPress={() =>
+                setEditLog((log: any) => ({
+                  ...log,
+                  workoutDone: !log.workoutDone,
+                }))
+              }
+            />
+            <ToggleButton
+              label="Golf day"
+              active={editLog.golf ?? false}
+              onPress={() =>
+                setEditLog((log: any) => ({ ...log, golf: !log.golf }))
+              }
+            />
+            <ToggleButton
+              label="Drinking day"
+              active={editLog.drinking ?? false}
+              onPress={() =>
+                setEditLog((log: any) => ({
+                  ...log,
+                  drinking: !log.drinking,
+                }))
+              }
+            />
+            {editLog.drinking && (
+              <InputField
+                label="Drinks"
+                value={String(editLog.drinks ?? 0)}
+                onChange={(v) =>
+                  setEditLog((log: any) => ({
+                    ...log,
+                    drinks: parseInt(v) || 0,
+                  }))
+                }
+              />
+            )}
+          </View>
+
+          {/* Notes */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>📝 Notes</Text>
+            <TextInput
+              style={styles.notesInput}
+              placeholder="Any notes for this day?"
+              placeholderTextColor="#64748b"
+              value={editLog.notes ?? ''}
+              onChangeText={(v) =>
+                setEditLog((log: any) => ({ ...log, notes: v }))
+              }
+              multiline
+              numberOfLines={4}
+            />
+          </View>
+
+          {/* Meals Selected */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>🍽️ Meals Logged ({selected.length})</Text>
+            {selected.length === 0 ? (
+              <Text style={styles.emptyText}>No meals selected</Text>
+            ) : (
+              selected.map((meal: any) => (
+                <Pressable
+                  key={meal.id}
+                  onPress={() => toggleMeal(meal.id)}
+                  style={styles.mealItem}
+                >
+                  <View style={styles.mealInfo}>
+                    <Text style={styles.mealName}>{meal.name}</Text>
+                    <Text style={styles.mealMacro}>
+                      {meal.calories} cal • {meal.protein}g P
+                    </Text>
+                  </View>
+                  <MaterialIcons
+                    name="remove-circle-outline"
+                    size={20}
+                    color="#ef4444"
+                  />
+                </Pressable>
+              ))
+            )}
+          </View>
+
+          <View style={{ height: 40 }} />
+        </ScrollView>
+
+        {/* Save Button */}
+        <View style={styles.footer}>
+          <Pressable
+            onPress={handleSave}
+            style={[
+              styles.saveButton,
+              { backgroundColor: ColorMap[status.status] },
+            ]}
+          >
+            <MaterialIcons
+              name="check-circle"
+              size={20}
+              color="#fff"
+              style={{ marginRight: 8 }}
+            />
+            <Text style={styles.saveButtonText}>Save Day</Text>
+          </Pressable>
+        </View>
+
+        {/* Confetti overlay (placeholder for actual animation) */}
+        {showConfetti && (
+          <View style={styles.confettiOverlay}>
+            <Text style={styles.confettiText}>🎉</Text>
+          </View>
+        )}
+      </SafeAreaView>
+    </Modal>
+  );
+}
+
+function InputField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <View style={styles.inputGroup}>
+      <Text style={styles.inputLabel}>{label}</Text>
+      <TextInput
+        style={styles.input}
+        value={value}
+        onChangeText={onChange}
+        keyboardType="numeric"
+        placeholderTextColor="#64748b"
+      />
+    </View>
+  );
+}
+
+function ToggleButton({
+  label,
+  active,
+  onPress,
+}: {
+  label: string;
+  active: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={[styles.toggleButton, active && styles.toggleButtonActive]}
+    >
+      <MaterialIcons
+        name={active ? 'check-circle' : 'radio-button-unchecked'}
+        size={20}
+        color={active ? '#10b981' : '#64748b'}
+        style={{ marginRight: 8 }}
+      />
+      <Text style={[styles.toggleLabel, active && styles.toggleLabelActive]}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#0b0f14',
+  },
+  header: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1f2937',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  closeButton: {
+    padding: 8,
+  },
+  dayOfWeek: {
+    fontSize: 12,
+    color: '#94a3b8',
+    fontWeight: '600',
+  },
+  dateText: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#fff',
+    marginTop: 4,
+  },
+  statusBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  statusText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  scrollContent: {
+    padding: 16,
+  },
+  section: {
+    marginBottom: 24,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#fff',
+    marginBottom: 12,
+  },
+  macroRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  macroBox: {
+    flex: 1,
+    backgroundColor: '#111827',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#1f2937',
+    padding: 12,
+    alignItems: 'center',
+  },
+  macroLabel: {
+    fontSize: 11,
+    color: '#94a3b8',
+    fontWeight: '600',
+  },
+  macroValue: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#fff',
+    marginTop: 4,
+  },
+  macroGoal: {
+    fontSize: 10,
+    color: '#64748b',
+    marginTop: 2,
+  },
+  inputGroup: {
+    marginBottom: 12,
+  },
+  inputLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#cbd5e1',
+    marginBottom: 6,
+  },
+  input: {
+    backgroundColor: '#111827',
+    borderWidth: 1,
+    borderColor: '#243244',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: '#fff',
+    fontSize: 14,
+  },
+  notesInput: {
+    backgroundColor: '#111827',
+    borderWidth: 1,
+    borderColor: '#243244',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: '#fff',
+    fontSize: 14,
+    minHeight: 80,
+    textAlignVertical: 'top',
+  },
+  toggleButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    backgroundColor: '#111827',
+    borderRadius: 10,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#243244',
+  },
+  toggleButtonActive: {
+    backgroundColor: '#064e3b',
+    borderColor: '#10b981',
+  },
+  toggleLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#cbd5e1',
+  },
+  toggleLabelActive: {
+    color: '#10b981',
+  },
+  mealItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#111827',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#243244',
+  },
+  mealInfo: {
+    flex: 1,
+  },
+  mealName: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  mealMacro: {
+    fontSize: 11,
+    color: '#94a3b8',
+    marginTop: 3,
+  },
+  emptyText: {
+    color: '#64748b',
+    fontSize: 13,
+    fontStyle: 'italic',
+  },
+  footer: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#1f2937',
+  },
+  saveButton: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 14,
+    borderRadius: 12,
+  },
+  saveButtonText: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#fff',
+  },
+  confettiOverlay: {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    transform: [{ translateX: -30 }, { translateY: -30 }],
+  },
+  confettiText: {
+    fontSize: 60,
+  },
+});
