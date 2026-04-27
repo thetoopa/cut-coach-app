@@ -1,0 +1,31 @@
+{
+  "expo": {
+    "name": "Cut Coach",
+    "slug": "cut-coach",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "backgroundColor": "#0b0f14"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.yourname.cutcoach"
+    },
+    "android": {
+      "package": "com.yourname.cutcoach"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "replace-after-eas-init"
+      }
+    },
+    "plugins": [
+      "expo-font"
+    ]
+  }
+}
