@@ -2,9 +2,11 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { SafeAreaView, ScrollView, View, Text, TextInput, Pressable, StyleSheet, Alert } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StatusBar } from 'expo-status-bar';
+import { MaterialIcons } from '@expo/vector-icons';
 import { CalendarView } from './src/components/CalendarView';
 import { DayDetailModal } from './src/components/DayDetailModal';
-
+import { AICoachModal } from './src/components/AICoachModal';
+; custom?: boolean
 type Tab = 'Today' | 'Meals' | 'Workout' | 'Cardio' | 'Profile';
 type Meal = { id: string; name: string; type: 'Breakfast'|'Lunch'|'Dinner'|'Snack'; calories: number; protein: number; carbs: number; fat: number; notes: string };
 type Exercise = { id: string; name: string; sets: number; minReps: number; maxReps: number; weight: number; lastReps: number[]; backup?: string };
@@ -78,6 +80,7 @@ function Input({label, value, onChange}:{label:string; value:string; onChange:(x
 export default function App(){
   const [tab,setTab]=useState<Tab>('Today');
   const [profile,setProfile]=useState<Profile>(defaultProfile);
+  const [mealsState, setMealsState] = useState<Meal[]>(meals);
   const [log,setLog]=useState<DayLog>({date:todayKey(), calories:0, protein:0, steps:0, outdoorWalk:0, inclineWalk:0, golf:false, drinking:false, drinks:0, workoutDone:false, selectedMeals:[], notes:''});
   const [workouts,setWorkouts]=useState<WorkoutDay[]>(baseWorkouts);
   const [selectedWorkout,setSelectedWorkout]=useState(0);
@@ -85,10 +88,11 @@ export default function App(){
   const [dayLogs, setDayLogs] = useState<Record<string, DayLog>>({});
   const [selectedDateForModal, setSelectedDateForModal] = useState<string>('');
   const [showDayModal, setShowDayModal] = useState(false);
-
+  const [showAICoach, setShowAICoach] = useState(false);setMealsState(v.meals??meals); } })()},[]);
+  useEffect(()=>{ AsyncStorage.setItem('cutCoach', JSON.stringify({profile,log,workouts,dayLogs,meals:mealsState})); },[profile,log,workouts,dayLogs,mealsState
   useEffect(()=>{(async()=>{ const raw=await AsyncStorage.getItem('cutCoach'); if(raw){ const v=JSON.parse(raw); setProfile(v.profile??defaultProfile); setLog(v.log?.date===todayKey()?v.log:{...log,date:todayKey()}); setWorkouts(v.workouts??baseWorkouts); setDayLogs(v.dayLogs??{}); } })()},[]);
   useEffect(()=>{ AsyncStorage.setItem('cutCoach', JSON.stringify({profile,log,workouts,dayLogs})); },[profile,log,workouts,dayLogs]);
-  useEffect(()=>{ if(rest<=0) return; const t=setInterval(()=>setRest(r=>Math.max(0,r-1)),1000); return ()=>clearInterval(t)},[rest]);
+  useEffect(()=>{ if(rStateest<=0) return; const t=setInterval(()=>setRest(r=>Math.max(0,r-1)),1000); return ()=>clearInterval(t)},[rest]);
 
   const picked = meals.filter(m=>log.selectedMeals.includes(m.id));
   const mealCals = picked.reduce((a,m)=>a+m.calories,0), mealProtein=picked.reduce((a,m)=>a+m.protein,0);
@@ -133,7 +137,13 @@ export default function App(){
     drinking: false,
     drinks: 0,
     workoutDone: false,
-    selectedMeals: [],
+    selected
+
+  // Handle saving meals from AI Coach
+  const handleSaveAIMeals = (customMeals: Meal[]) => {
+    const allMeals = [...mealsState, ...customMeals];
+    setMealsState(allMeals);
+  };Meals: [],
     notes: ''
   }) : null;
 
@@ -162,8 +172,13 @@ export default function App(){
       </>}
 
       {tab==='Meals' && <>
-        <Section title="Meal Picker"><Text style={s.note}>Tap meals to add/remove. Use this as your menu. Add custom food later by editing the meal array in code.</Text></Section>
-        {(['Breakfast','Lunch','Dinner','Snack'] as const).map(type=><Section key={type} title={type}>{meals.filter(m=>m.type===type).map(m=><Pressable key={m.id} onPress={()=>toggleMeal(m.id)} style={[s.meal, log.selectedMeals.includes(m.id)&&s.mealActive]}><Text style={s.mealTitle}>{m.name}</Text><Text style={s.mealSub}>{m.calories} cal · {m.protein}g protein · {m.carbs}C/{m.fat}F</Text><Text style={s.note}>{m.notes}</Text></Pressable>)}</Section>)}
+        <Section title="🍽️ Your Meal Menu">
+          <View style={{flexDirection: 'row', gap: 8, marginBottom: 12}}>
+            <Pressable style={{flex: 1}} onPress={() => setShowAICoach(true)}><View style={s.aiButton}><MaterialIcons name="smart-toy" size={16} color="#fff" /><Text style={s.aiButtonText}>Ask AI Coach</Text></View></Pressable>
+          </View>
+          <Text style={s.note}>Tap meals to add/remove. Use this as your menu.</Text>
+        </Section>
+        {(['Breakfast','Lunch','Dinner','Snack'] as const).map(type=><Section key={type} title={type}>{mealsState.filter(m=>m.type===type).map(m=><Pressable key={m.id} onPress={()=>toggleMeal(m.id)} style={[s.meal, log.selectedMeals.includes(m.id)&&s.mealActive]}><Text style={s.mealTitle}>{m.name}{m.custom ? ' ✨' : ''}</Text><Text style={s.mealSub}>{m.calories} cal · {m.protein}g protein · {m.carbs}C/{m.fat}F</Text><Text style={s.note}>{m.notes}</Text></Pressable>)}</Section>)}
       </>}
 
       {tab==='Workout' && <>
@@ -199,7 +214,13 @@ export default function App(){
       profile={profile}
       onClose={() => setShowDayModal(false)}
       onSave={handleSaveDayLog}
-      allMeals={meals}
+      allMeals={mealsState}
+    />
+    <AICoachModal
+      visible={showAICoach}
+      profile={profile}
+      onClose={() => setShowAICoach(false)}
+      onSaveMeals={handleSaveAIMeals}
     />
   </SafeAreaView>
 }
