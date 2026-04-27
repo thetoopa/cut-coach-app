@@ -92,17 +92,18 @@ src/
 
 ## Feature Implementation Priority
 
-### Phase 1 (CURRENT): Calendar & Logging UI ✓ Priority
+### Phase 1 (COMPLETE): Calendar & Logging UI ✓
 - [x] Calendar view with day cells
-- [ ] Color-coded status (green = logged + hit goals, yellow = partial, red = over/under)
-- [ ] Day detail modal showing full log
-- [ ] Live streaks display
-- [ ] Quick-log buttons (✓ check, confetti, sound)
+- [x] Color-coded status (green = logged + hit goals, yellow = partial, red = over/under)
+- [x] Day detail modal showing full log
+- [x] Live streaks display
+- [x] Quick-log buttons (✓ check, confetti, sound)
 
-### Phase 2: Enhanced Meals System
-- [ ] Meal favorites/bookmarks
-- [ ] Custom meal creation with full metadata
-- [ ] Meal recommendations based on macros needed
+### Phase 2 (IN PROGRESS): Enhanced Meals System
+- [x] **AI Coach intake form** (NEW - conversational meal planning)
+- [x] Meal recommendations from AI
+- [ ] Meal favorites/bookmarks (manual UI)
+- [ ] Custom meal creation form
 - [ ] Meal sharing/templates with friends
 - [ ] Meal bank with filtering
 
