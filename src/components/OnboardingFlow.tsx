@@ -391,7 +391,7 @@ export function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
                 size={20}
                 color="#052e1c"
               />
-              <Text style={styles.completeText}>Start Using CalorieCounter!</Text>
+              <Text style={styles.completeText}>Start Using Calos!</Text>
             </Pressable>
           </>
         )}

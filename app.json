@@ -1,12 +1,14 @@
 {
   "expo": {
-    "name": "CalorieCounter",
-    "slug": "calorie-counter",
+    "name": "Calos",
+    "slug": "calos",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "cover",
       "backgroundColor": "#0b0f14"
     },
     "assetBundlePatterns": [
@@ -14,14 +16,14 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.toopa.caloriecounter",
+      "bundleIdentifier": "com.toopa.calos",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       },
-      "buildNumber": "3"
+      "buildNumber": "4"
     },
     "android": {
-      "package": "com.yourname.caloriecounter",
+      "package": "com.toopa.calos",
       "versionCode": 2
     },
     "extra": {

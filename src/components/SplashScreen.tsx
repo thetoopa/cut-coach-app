@@ -1,5 +1,5 @@
-import React, { useEffect } from 'react';
-import { SafeAreaView, Image, StyleSheet, Animated } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import { Image, StyleSheet, Animated } from 'react-native';
 
 interface SplashScreenProps {
   onFinish: () => void;
@@ -7,10 +7,16 @@ interface SplashScreenProps {
 }
 
 export const SplashScreen: React.FC<SplashScreenProps> = ({ onFinish, duration = 1500 }) => {
-  const opacity = React.useRef(new Animated.Value(1)).current;
+  const opacity = useRef(new Animated.Value(1)).current;
+  const hasFinished = useRef(false);
 
   useEffect(() => {
+    if (hasFinished.current) return;
+
     const timer = setTimeout(() => {
+      if (hasFinished.current) return;
+      hasFinished.current = true;
+
       Animated.timing(opacity, {
         toValue: 0,
         duration: 300,
@@ -21,17 +27,15 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onFinish, duration =
     }, duration);
 
     return () => clearTimeout(timer);
-  }, [duration, onFinish, opacity]);
+  }, []);
 
   return (
     <Animated.View style={[styles.container, { opacity }]}>
-      <SafeAreaView style={styles.safeArea}>
-        <Image
-          source={require('../../assets/ChatGPT Image Apr 28, 2026, 02_21_04 AM.png')}
-          style={styles.image}
-          resizeMode="contain"
-        />
-      </SafeAreaView>
+      <Image
+        source={require('../../assets/splash.png')}
+        style={styles.image}
+        resizeMode="cover"
+      />
     </Animated.View>
   );
 };
@@ -40,14 +44,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#000',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  safeArea: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    width: '100%',
   },
   image: {
     width: '100%',

@@ -1,4 +1,4 @@
-# CalorieCounter
+# Calos
 
 A local-first Expo/React Native app for calorie tracking, meals, workouts, progressive overload, cardio, golf mode, and drinking-day budget.
 

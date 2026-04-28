@@ -328,12 +328,18 @@ export function calculateNutritionTargets(profile: any) {
   const deficit = goal === 'cut' ? lossOption.deficit : goal === 'bulk' ? -300 : 0;
   const calorieGoal = Math.round(Math.max(profile.sex === 'female' ? 1300 : 1500, maintenance - deficit));
   const proteinGoal = Math.round(Math.max(profile.weight * 0.85, profile.goal === 'cut' ? profile.weight : profile.weight * 0.8));
+  const remainingCalories = Math.max(0, calorieGoal - proteinGoal * 4);
+  const carbRatio = goal === 'bulk' ? 0.58 : goal === 'maintain' ? 0.52 : 0.45;
+  const carbGoal = Math.round(Math.max(goal === 'cut' ? 80 : 120, (remainingCalories * carbRatio) / 4));
+  const fatGoal = Math.round(Math.max(profile.sex === 'female' ? 45 : 50, (remainingCalories - carbGoal * 4) / 9));
 
   return {
     bmr,
     maintenance,
     calorieGoal,
     proteinGoal,
+    carbGoal,
+    fatGoal,
     deficit,
     lossOption,
   };

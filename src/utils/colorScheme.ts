@@ -1,7 +1,7 @@
 // src/utils/colorScheme.ts
 // Color-coding logic for DayLog entries
 
-import { calculateEffectiveCalorieGoal } from './calculations';
+import { calculateCardioPlan, calculateEffectiveCalorieGoal } from './calculations';
 
 export type DayStatus = 'green' | 'yellow' | 'red' | 'gray';
 
@@ -15,6 +15,9 @@ export interface DayStatusBreakdown {
     proteinStatus: 'target' | 'over' | 'under' | 'none';
     hasWorkout: boolean;
     hasCardio: boolean;
+    workoutRequired: boolean;
+    cardioRequired: boolean;
+    cardioStatus: 'target' | 'under' | 'none';
     hasLogging: boolean;
   };
 }
@@ -59,26 +62,32 @@ export function getDayStatus(
         proteinStatus: 'none',
         hasWorkout: false,
         hasCardio: false,
+        workoutRequired: false,
+        cardioRequired: false,
+        cardioStatus: 'none',
         hasLogging: false,
       },
     };
   }
 
-  const activityCalories =
-    Math.max(0, Number(dayLog.cardioBurnedCalories) || 0) +
-    Math.max(0, Number(dayLog.golfBurnedCalories) || 0) +
-    Math.max(0, Number(dayLog.otherBurnedCalories) || 0) +
-    (dayLog.golf ? Math.max(1, Number(dayLog.golfHoles) || 0) : 0);
   const cardioMinutes = (dayLog.outdoorWalk ?? 0) + (dayLog.inclineWalk ?? 0);
 
   const effectiveCalories = calculateEffectiveCalorieGoal(profile, dayLog);
-  const details = {
+  const cardioPlan = calculateCardioPlan(dayLog, profile);
+  const workoutRequired = dayLog.plannedLift !== false;
+  const cardioRequired = cardioPlan.targetCalories > 0;
+  const hasCardio = cardioMinutes > 0 || cardioPlan.burnedCalories > 0;
+  const cardioComplete = !cardioRequired || cardioPlan.burnedCalories >= cardioPlan.targetCalories;
+  const details: DayStatusBreakdown['details'] = {
     hasCalories: (dayLog.calories ?? 0) > 0,
     calorieStatus: getCalorieStatus(dayLog.calories ?? 0, effectiveCalories.goal, tolerance.calories),
     hasProtein: (dayLog.protein ?? 0) > 0,
     proteinStatus: getProteinStatus(dayLog.protein ?? 0, profile.proteinGoal, tolerance.protein),
     hasWorkout: dayLog.workoutDone ?? false,
-    hasCardio: cardioMinutes > 0 || activityCalories > 0,
+    hasCardio,
+    workoutRequired,
+    cardioRequired,
+    cardioStatus: cardioComplete ? 'target' : hasCardio ? 'under' : 'none',
     hasLogging: true,
   };
 
@@ -87,14 +96,18 @@ export function getDayStatus(
 
   const isCalorieGreen =
     profile.goal === 'cut'
-      ? (dayLog.calories ?? 0) >= effectiveCalories.goal - 300 && (dayLog.calories ?? 0) <= effectiveCalories.goal + tolerance.calories
+      ? (dayLog.calories ?? 0) <= effectiveCalories.goal + tolerance.calories
       : Math.abs((dayLog.calories ?? 0) - effectiveCalories.goal) <= tolerance.calories;
+  const isProteinGreen = (dayLog.protein ?? 0) >= profile.proteinGoal - tolerance.protein;
+  const workoutComplete = !workoutRequired || details.hasWorkout;
 
   const isOnTarget =
     isCalorieGreen &&
-    details.proteinStatus === 'target';
+    isProteinGreen &&
+    workoutComplete &&
+    cardioComplete;
 
-  // GREEN: Logged everything and on target
+  // GREEN: Logged food, hit protein, stayed within calories, and completed planned activity.
   if (details.hasCalories && details.hasProtein && isOnTarget) {
     status = 'green';
   }
@@ -113,7 +126,7 @@ export function getDayStatus(
 
   return {
     status,
-    reason: getStatusReason(status, details),
+    reason: getStatusReason(status, details, dayLog, profile, effectiveCalories.goal, cardioPlan.targetCalories, cardioPlan.burnedCalories),
     details,
   };
 }
@@ -140,17 +153,58 @@ function getProteinStatus(
   return diff > 0 ? 'over' : 'under';
 }
 
-function getStatusReason(status: DayStatus, details: DayStatusBreakdown['details']): string {
+function getStatusReason(
+  status: DayStatus,
+  details: DayStatusBreakdown['details'],
+  dayLog: any,
+  profile: any,
+  calorieGoal: number,
+  cardioTarget: number,
+  cardioBurned: number
+): string {
   if (status === 'green') return 'On track! 🎉';
+  const missing = getMissingItems(details, dayLog, profile, calorieGoal, cardioTarget, cardioBurned);
   if (status === 'red') {
-    if (!details.hasCalories) return 'No meals logged';
-    if (details.calorieStatus === 'over') return 'Over calorie goal';
-    if (details.proteinStatus === 'under') return 'Under protein goal';
-    if (!details.hasWorkout && !details.hasCardio) return 'No workout/cardio';
+    if (missing.length) return missing.slice(0, 2).join(', ');
     return 'Off track';
   }
-  if (status === 'yellow') return 'Partial logging';
+  if (status === 'yellow') return missing.length ? missing.slice(0, 2).join(', ') : 'Partial logging';
   return 'No data';
+}
+
+function getMissingItems(
+  details: DayStatusBreakdown['details'],
+  dayLog: any,
+  profile: any,
+  calorieGoal: number,
+  cardioTarget: number,
+  cardioBurned: number
+): string[] {
+  const missing: string[] = [];
+  const calories = dayLog.calories ?? 0;
+  const protein = dayLog.protein ?? 0;
+
+  if (!details.hasCalories) {
+    missing.push('Log meals');
+  } else if (calories > calorieGoal + 100) {
+    missing.push(`Over calories by ${Math.round(calories - calorieGoal)}`);
+  }
+
+  if (!details.hasProtein) {
+    missing.push('Log protein');
+  } else if (protein < profile.proteinGoal - 10) {
+    missing.push(`Need ${Math.round(profile.proteinGoal - protein)}g protein`);
+  }
+
+  if (details.workoutRequired && !details.hasWorkout) {
+    missing.push('Log workout');
+  }
+
+  if (details.cardioRequired && details.cardioStatus !== 'target') {
+    missing.push(`Need ${Math.max(0, Math.round(cardioTarget - cardioBurned))} cardio cal`);
+  }
+
+  return missing;
 }
 
 export const ColorMap = {

@@ -11,6 +11,8 @@ import {
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { calculateNutritionTargets, weeklyLossOptions } from '../utils/calculations';
+import { MealPreferencesConversation } from './MealPreferencesConversation';
+import { WorkoutPreferencesConversation } from './WorkoutPreferencesConversation';
 
 interface EnhancedOnboardingFlowProps {
   onComplete: (profile: any) => void;
@@ -34,6 +36,8 @@ export function EnhancedOnboardingFlow({ onComplete }: EnhancedOnboardingFlowPro
     aggression: 500,
     proteinGoal: 170,
     calorieGoal: 1900,
+    carbGoal: 145,
+    fatGoal: 71,
   });
 
   const [mealPrefs, setMealPrefs] = useState({
@@ -88,6 +92,8 @@ export function EnhancedOnboardingFlow({ onComplete }: EnhancedOnboardingFlowPro
       activity,
       proteinGoal: targets.proteinGoal,
       calorieGoal: targets.calorieGoal,
+      carbGoal: targets.carbGoal,
+      fatGoal: targets.fatGoal,
       aggression: targets.deficit,
     }));
     setStep('gym');
@@ -134,11 +140,43 @@ export function EnhancedOnboardingFlow({ onComplete }: EnhancedOnboardingFlowPro
     }));
   };
 
-  const handleMealPrefsNext = () => {
+  const handleMealPrefsComplete = (mealPrefsData: any) => {
+    setMealPrefs(mealPrefsData);
     setStep('workoutPrefs');
   };
 
-  const handleWorkoutPrefsNext = () => {
+  const handleMealPrefsSkip = () => {
+    setMealPrefs({
+      cookingTimePerMeal: 'moderate',
+      favoriteProteins: [],
+      favoriteCarbs: [],
+      favoriteVeggies: [],
+      favoriteFruits: [],
+      allergies: '',
+    });
+    setStep('workoutPrefs');
+  };
+
+  const handleWorkoutPrefsComplete = (workoutPrefsData: any) => {
+    setWorkoutPrefs({
+      useDefaults: false,
+      timePerWorkout: '45-60 minutes',
+      equipmentAccess: workoutPrefsData.equipmentAccess || workoutPrefsData.gymType || 'full gym',
+      likedExercises: workoutPrefsData.likedExercises || '',
+      trainingLimits: workoutPrefsData.trainingLimits || '',
+      ...workoutPrefsData,
+    });
+    setStep('review');
+  };
+
+  const handleWorkoutPrefsSkip = () => {
+    setWorkoutPrefs({
+      useDefaults: true,
+      timePerWorkout: '45-60 minutes',
+      equipmentAccess: 'full gym',
+      likedExercises: '',
+      trainingLimits: '',
+    });
     setStep('review');
   };
 
@@ -156,6 +194,28 @@ export function EnhancedOnboardingFlow({ onComplete }: EnhancedOnboardingFlowPro
       <Text style={[styles.pillText, active && styles.pillTextActive]}>{children}</Text>
     </Pressable>
   );
+
+  if (step === 'mealPrefs') {
+    return (
+      <SafeAreaView style={styles.container}>
+        <MealPreferencesConversation
+          onComplete={handleMealPrefsComplete}
+          onSkip={handleMealPrefsSkip}
+        />
+      </SafeAreaView>
+    );
+  }
+
+  if (step === 'workoutPrefs') {
+    return (
+      <SafeAreaView style={styles.container}>
+        <WorkoutPreferencesConversation
+          onComplete={handleWorkoutPrefsComplete}
+          onSkip={handleWorkoutPrefsSkip}
+        />
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -361,166 +421,6 @@ export function EnhancedOnboardingFlow({ onComplete }: EnhancedOnboardingFlowPro
           </>
         )}
 
-        {step === 'mealPrefs' && (
-          <>
-            <Text style={styles.title}>Meal Customization 🍽️</Text>
-            <Text style={styles.subtitle}>Tell us your food preferences (skip to use defaults)</Text>
-
-            <View style={styles.card}>
-              <Text style={styles.label}>Cooking time per meal</Text>
-              <View style={styles.pillRow}>
-                {(['quick', 'moderate', 'detailed'] as const).map((time) => (
-                  <Pill
-                    key={time}
-                    active={mealPrefs.cookingTimePerMeal === time}
-                    onPress={() => setMealPrefs(p => ({ ...p, cookingTimePerMeal: time }))}
-                  >
-                    {time.charAt(0).toUpperCase() + time.slice(1)}
-                  </Pill>
-                ))}
-              </View>
-
-              <Text style={[styles.label, { marginTop: 14 }]}>Favorite proteins</Text>
-              <View style={styles.pillRow}>
-                {['Chicken', 'Turkey', 'Beef', 'Fish', 'Eggs', 'Dairy'].map((p) => (
-                  <Pill
-                    key={p}
-                    active={mealPrefs.favoriteProteins.includes(p)}
-                    onPress={() => toggleProtein(p)}
-                  >
-                    {p}
-                  </Pill>
-                ))}
-              </View>
-
-              <Text style={[styles.label, { marginTop: 14 }]}>Favorite carbs</Text>
-              <View style={styles.pillRow}>
-                {['Rice', 'Pasta', 'Potatoes', 'Oats', 'Bread', 'Fruits'].map((c) => (
-                  <Pill
-                    key={c}
-                    active={mealPrefs.favoriteCarbs.includes(c)}
-                    onPress={() => toggleCarb(c)}
-                  >
-                    {c}
-                  </Pill>
-                ))}
-              </View>
-
-              <Text style={[styles.label, { marginTop: 14 }]}>Favorite vegetables</Text>
-              <View style={styles.pillRow}>
-                {['Broccoli', 'Spinach', 'Carrots', 'Bell Peppers', 'Asparagus'].map((v) => (
-                  <Pill
-                    key={v}
-                    active={mealPrefs.favoriteVeggies.includes(v)}
-                    onPress={() => toggleVeggie(v)}
-                  >
-                    {v}
-                  </Pill>
-                ))}
-              </View>
-
-              <Text style={styles.label}>Allergies/Restrictions</Text>
-              <TextInput
-                style={styles.input}
-                value={mealPrefs.allergies}
-                onChangeText={(v) => setMealPrefs(p => ({ ...p, allergies: v }))}
-                placeholder="e.g., Gluten-free, no dairy"
-                placeholderTextColor="#64748b"
-              />
-
-              <View style={styles.buttonRow}>
-                <Pressable onPress={() => setStep('workoutPrefs')} style={styles.nextButton}>
-                  <Text style={styles.nextButtonText}>Next</Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => {
-                    setMealPrefs({
-                      cookingTimePerMeal: 'moderate',
-                      favoriteProteins: [],
-                      favoriteCarbs: [],
-                      favoriteVeggies: [],
-                      favoriteFruits: [],
-                      allergies: '',
-                    });
-                    setStep('workoutPrefs');
-                  }}
-                  style={styles.skipButton}
-                >
-                  <Text style={styles.skipButtonText}>Skip</Text>
-                </Pressable>
-              </View>
-            </View>
-          </>
-        )}
-
-        {step === 'workoutPrefs' && (
-          <>
-            <Text style={styles.title}>Workout Preferences 🏋️</Text>
-            <Text style={styles.subtitle}>Customize or use defaults</Text>
-
-            <View style={styles.card}>
-              <View style={styles.buttonRow}>
-                <Pressable
-                  onPress={() => setWorkoutPrefs(p => ({ ...p, useDefaults: false }))}
-                  style={[styles.prefButton, !workoutPrefs.useDefaults && styles.prefButtonActive]}
-                >
-                  <Text style={[styles.prefButtonText, !workoutPrefs.useDefaults && styles.prefButtonTextActive]}>Customize</Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => setWorkoutPrefs(p => ({ ...p, useDefaults: true }))}
-                  style={[styles.prefButton, workoutPrefs.useDefaults && styles.prefButtonActive]}
-                >
-                  <Text style={[styles.prefButtonText, workoutPrefs.useDefaults && styles.prefButtonTextActive]}>Use Defaults</Text>
-                </Pressable>
-              </View>
-
-              {!workoutPrefs.useDefaults && (
-                <>
-                  <Text style={[styles.label, { marginTop: 14 }]}>Time per workout</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={workoutPrefs.timePerWorkout}
-                    onChangeText={(v) => setWorkoutPrefs(p => ({ ...p, timePerWorkout: v }))}
-                    placeholder="e.g., 45-60 minutes"
-                    placeholderTextColor="#64748b"
-                  />
-
-                  <Text style={styles.label}>Equipment access</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={workoutPrefs.equipmentAccess}
-                    onChangeText={(v) => setWorkoutPrefs(p => ({ ...p, equipmentAccess: v }))}
-                    placeholder="e.g., Full gym, or home only"
-                    placeholderTextColor="#64748b"
-                  />
-
-                  <Text style={styles.label}>Exercises you like</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={workoutPrefs.likedExercises}
-                    onChangeText={(v) => setWorkoutPrefs(p => ({ ...p, likedExercises: v }))}
-                    placeholder="e.g., Bench press, dumbbells"
-                    placeholderTextColor="#64748b"
-                  />
-
-                  <Text style={styles.label}>Training limitations</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={workoutPrefs.trainingLimits}
-                    onChangeText={(v) => setWorkoutPrefs(p => ({ ...p, trainingLimits: v }))}
-                    placeholder="e.g., No knee exercises"
-                    placeholderTextColor="#64748b"
-                  />
-                </>
-              )}
-
-              <Pressable onPress={handleWorkoutPrefsNext} style={styles.nextButton}>
-                <Text style={styles.nextButtonText}>Review & Complete</Text>
-              </Pressable>
-            </View>
-          </>
-        )}
-
         {step === 'review' && (
           <>
             <Text style={styles.title}>Review Your Profile ✅</Text>
@@ -544,6 +444,10 @@ export function EnhancedOnboardingFlow({ onComplete }: EnhancedOnboardingFlowPro
                 <Text style={styles.reviewValue}>{profile.proteinGoal}g</Text>
               </View>
               <View style={styles.reviewRow}>
+                <Text style={styles.reviewLabel}>Carbs / Fat:</Text>
+                <Text style={styles.reviewValue}>{profile.carbGoal}g / {profile.fatGoal}g</Text>
+              </View>
+              <View style={styles.reviewRow}>
                 <Text style={styles.reviewLabel}>Gym Days/Week:</Text>
                 <Text style={styles.reviewValue}>{profile.gymDaysPerWeek}x</Text>
               </View>
@@ -558,7 +462,7 @@ export function EnhancedOnboardingFlow({ onComplete }: EnhancedOnboardingFlowPro
 
               <Pressable onPress={handleComplete} style={styles.completeButton}>
                 <MaterialIcons name="check" size={18} color="#052e1c" />
-                <Text style={styles.completeButtonText}>Start Using CalorieCounter</Text>
+                <Text style={styles.completeButtonText}>Start Using Calos</Text>
               </Pressable>
             </View>
           </>

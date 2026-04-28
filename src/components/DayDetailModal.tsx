@@ -14,7 +14,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { getDayStatus, ColorMap } from '../utils/colorScheme';
 import { getDateString, getDayOfWeekShort } from '../utils/dateHelpers';
 import { SoundManager, ConfettiEffect } from '../utils/soundAndHaptics';
-import { calculateCardioPlan, calculateEffectiveCalorieGoal, calculateWaterPlan } from '../utils/calculations';
+import { calculateCardioPlan, calculateEffectiveCalorieGoal, calculateNutritionTargets, calculateWaterPlan } from '../utils/calculations';
 
 interface DayDetailModalProps {
   visible: boolean;
@@ -42,10 +42,20 @@ export function DayDetailModal({
     setEditLog(dayLog);
   }, [dayLog, visible]);
 
-  const status = getDayStatus(editLog, profile);
   const selected = allMeals.filter((m) => editLog.selectedMeals?.includes(m.id)) ?? [];
   const mealCals = selected.reduce((a: number, m: any) => a + m.calories, 0);
   const mealProtein = selected.reduce((a: number, m: any) => a + m.protein, 0);
+  const mealCarbs = selected.reduce((a: number, m: any) => a + (m.carbs ?? 0), 0);
+  const mealFat = selected.reduce((a: number, m: any) => a + (m.fat ?? 0), 0);
+  const statusLog = {
+    ...editLog,
+    calories: (selected.length > 0 ? mealCals : editLog.calories) + (editLog.drinking ? editLog.alcoholCalories ?? (editLog.drinks ?? 0) * 115 : 0),
+    protein: selected.length > 0 ? mealProtein : editLog.protein,
+  };
+  const status = getDayStatus(statusLog, profile);
+  const derivedTargets = calculateNutritionTargets(profile);
+  const carbGoal = profile.carbGoal ?? derivedTargets.carbGoal;
+  const fatGoal = profile.fatGoal ?? derivedTargets.fatGoal;
   
   // Cardio tracking
   const cardioPlan = calculateCardioPlan(editLog, profile);
@@ -108,6 +118,16 @@ export function DayDetailModal({
                 <Text style={styles.macroLabel}>Protein</Text>
                 <Text style={styles.macroValue}>{mealProtein}g</Text>
                 <Text style={styles.macroGoal}>/ {profile.proteinGoal}g</Text>
+              </View>
+              <View style={styles.macroBox}>
+                <Text style={styles.macroLabel}>Carbs</Text>
+                <Text style={styles.macroValue}>{mealCarbs}g</Text>
+                <Text style={styles.macroGoal}>/ {carbGoal}g</Text>
+              </View>
+              <View style={styles.macroBox}>
+                <Text style={styles.macroLabel}>Fat</Text>
+                <Text style={styles.macroValue}>{mealFat}g</Text>
+                <Text style={styles.macroGoal}>/ {fatGoal}g</Text>
               </View>
               <View style={styles.macroBox}>
                 <Text style={styles.macroLabel}>Remaining</Text>
@@ -297,20 +317,58 @@ export function DayDetailModal({
                 setEditLog((log: any) => ({
                   ...log,
                   drinking: !log.drinking,
+                  alcoholCalories: !log.drinking ? (log.drinks ?? 0) * 115 : log.alcoholCalories,
                 }))
               }
             />
             {editLog.drinking && (
-              <InputField
-                label="Drinks"
-                value={String(editLog.drinks ?? 0)}
-                onChange={(v) =>
-                  setEditLog((log: any) => ({
-                    ...log,
-                    drinks: parseInt(v) || 0,
-                  }))
-                }
-              />
+              <>
+                <InputField
+                  label="Drinks"
+                  value={String(editLog.drinks ?? 0)}
+                  onChange={(v) =>
+                    setEditLog((log: any) => ({
+                      ...log,
+                      drinks: parseInt(v) || 0,
+                      alcoholCalories: (parseInt(v) || 0) * 115,
+                    }))
+                  }
+                />
+                <InputField
+                  label="Estimated drink calories"
+                  value={String(editLog.alcoholCalories ?? (editLog.drinks ?? 0) * 115)}
+                  onChange={(v) =>
+                    setEditLog((log: any) => ({
+                      ...log,
+                      alcoholCalories: v === '' ? undefined : parseInt(v) || 0,
+                    }))
+                  }
+                />
+                <Text style={styles.helpText}>Default estimate is 115 calories per drink. Change it if you know the actual drink calories.</Text>
+              </>
+            )}
+          </View>
+
+          {/* Workout Logged */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>🏋️ Workout Logged</Text>
+            {editLog.workoutEntries?.length ? (
+              <>
+                <Text style={styles.helpText}>{editLog.workoutName || 'Workout'} set log</Text>
+                {editLog.workoutEntries.map((exercise: any) => {
+                  const setText = exercise.sets
+                    ?.map((set: any) => `S${set.set}: ${set.weight ?? exercise.weight ?? 0} lb x ${set.reps || '-'} reps`)
+                    .join(' · ');
+                  return (
+                    <View key={exercise.id} style={styles.workoutLogItem}>
+                      <Text style={styles.workoutLogName}>{exercise.name}</Text>
+                      <Text style={styles.workoutLogMeta}>{setText}</Text>
+                    </View>
+                  );
+                })}
+              </>
+            ) : (
+              <Text style={styles.emptyText}>No set-by-set workout log saved for this day yet.</Text>
             )}
           </View>
 
@@ -509,10 +567,12 @@ const styles = StyleSheet.create({
   },
   macroRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 10,
   },
   macroBox: {
-    flex: 1,
+    flexGrow: 1,
+    flexBasis: '30%',
     backgroundColor: '#111827',
     borderRadius: 12,
     borderWidth: 1,
@@ -694,6 +754,26 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#94a3b8',
     marginTop: 3,
+  },
+  workoutLogItem: {
+    backgroundColor: '#111827',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#243244',
+  },
+  workoutLogName: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#fff',
+  },
+  workoutLogMeta: {
+    fontSize: 12,
+    color: '#94a3b8',
+    lineHeight: 18,
+    marginTop: 4,
   },
   emptyText: {
     color: '#64748b',

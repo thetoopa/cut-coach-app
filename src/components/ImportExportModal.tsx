@@ -1,5 +1,5 @@
 // src/components/ImportExportModal.tsx
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Modal,
   View,
@@ -28,12 +28,14 @@ export function ImportExportModal({ visible, type, items, onClose, onImport }: I
   const [importText, setImportText] = useState('');
   const [copied, setCopied] = useState(false);
 
-  const handleExport = () => {
-    const json = type === 'meal' ? generateMealJSON(items) : generateWorkoutJSON(items);
-    // In a real app, you'd use Clipboard API, but for now we'll display it
+  const exportJson = useMemo(() => {
+    return type === 'meal' ? generateMealJSON(items) : generateWorkoutJSON(items);
+  }, [type, items]);
+
+  const handleCopy = () => {
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
-    return json;
+    Alert.alert('JSON ready', 'Select the JSON text above to copy it, then paste it into ChatGPT or another tool.');
   };
 
   const handleImport = () => {
@@ -67,22 +69,19 @@ export function ImportExportModal({ visible, type, items, onClose, onImport }: I
     );
   };
 
-  const exportJson = handleExport();
-
   return (
     <Modal visible={visible} animationType="slide" transparent>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={s.backdrop}>
-        <ScrollView style={s.scrollContainer} contentContainerStyle={s.scrollContent}>
-          <View style={s.card}>
-            <View style={s.header}>
-              <Text style={s.h2}>
-                {type === 'meal' ? '🍽️' : '🏋️'} {type === 'meal' ? 'Meals' : 'Workouts'} Import/Export
-              </Text>
-              <Pressable onPress={onClose} style={s.closeButton}>
-                <MaterialIcons name="close" size={22} color="#cbd5e1" />
-              </Pressable>
-            </View>
-
+        <View style={s.container}>
+          <View style={s.header}>
+            <Text style={s.h2}>
+              {type === 'meal' ? '🍽️' : '🏋️'} {type === 'meal' ? 'Meals' : 'Workouts'} Import/Export
+            </Text>
+            <Pressable onPress={onClose} style={s.closeButton}>
+              <MaterialIcons name="close" size={22} color="#cbd5e1" />
+            </Pressable>
+          </View>
+          <ScrollView style={s.scrollContainer} contentContainerStyle={s.scrollContent}>
             <View style={s.modeSelector}>
               <Pressable
                 onPress={() => setMode('export')}
@@ -105,14 +104,11 @@ export function ImportExportModal({ visible, type, items, onClose, onImport }: I
                 <Text style={s.description}>
                   Copy this JSON and share it with ChatGPT or another tool to customize further. You can also import the response back into the app.
                 </Text>
-                <View style={s.jsonBox}>
+                <ScrollView style={s.jsonBox} scrollEnabled={true}>
                   <Text style={s.jsonText}>{exportJson}</Text>
-                </View>
+                </ScrollView>
                 <Pressable
-                  onPress={() => {
-                    // Copy to clipboard would happen here in a real implementation
-                    Alert.alert('Copied!', 'JSON copied to clipboard. You can now paste it into ChatGPT or another tool.');
-                  }}
+                  onPress={handleCopy}
                   style={s.copyButton}
                 >
                   <MaterialIcons name="content-copy" size={16} color="#fff" />
@@ -141,8 +137,8 @@ export function ImportExportModal({ visible, type, items, onClose, onImport }: I
                 </Pressable>
               </View>
             )}
-          </View>
-        </ScrollView>
+          </ScrollView>
+        </View>
       </KeyboardAvoidingView>
     </Modal>
   );
@@ -154,27 +150,23 @@ const s = StyleSheet.create({
     justifyContent: 'flex-end',
     backgroundColor: 'rgba(0,0,0,0.55)',
   },
-  scrollContainer: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingBottom: 24,
-  },
-  card: {
+  container: {
+    maxHeight: '90%',
     backgroundColor: '#111827',
     borderTopLeftRadius: 18,
     borderTopRightRadius: 18,
     borderWidth: 1,
     borderColor: '#243244',
-    paddingVertical: 16,
-    paddingHorizontal: 16,
-    marginTop: 'auto',
+    overflow: 'hidden',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 16,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 8,
+    zIndex: 10,
   },
   h2: {
     fontSize: 18,
@@ -190,6 +182,12 @@ const s = StyleSheet.create({
     backgroundColor: '#0b1220',
     borderWidth: 1,
     borderColor: '#243244',
+  },
+  scrollContainer: {
+  },
+  scrollContent: {
+    paddingHorizontal: 16,
+    paddingBottom: 24,
   },
   modeSelector: {
     flexDirection: 'row',
@@ -234,7 +232,8 @@ const s = StyleSheet.create({
     borderColor: '#243244',
     borderRadius: 12,
     padding: 12,
-    maxHeight: 300,
+    maxHeight: 250,
+    minHeight: 150,
   },
   jsonText: {
     color: '#cbd5e1',

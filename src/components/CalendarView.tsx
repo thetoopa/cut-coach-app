@@ -71,7 +71,8 @@ export function CalendarView({
     const selectedMeals = allMeals.filter((meal) => rawLog.selectedMeals?.includes(meal.id));
     const mealCalories = selectedMeals.reduce((total, meal) => total + (meal.calories ?? 0), 0);
     const mealProtein = selectedMeals.reduce((total, meal) => total + (meal.protein ?? 0), 0);
-    const calories = selectedMeals.length > 0 ? mealCalories : rawLog.calories ?? 0;
+    const alcoholCalories = rawLog.drinking ? rawLog.alcoholCalories ?? (rawLog.drinks ?? 0) * 115 : 0;
+    const calories = (selectedMeals.length > 0 ? mealCalories : rawLog.calories ?? 0) + alcoholCalories;
     const protein = selectedMeals.length > 0 ? mealProtein : rawLog.protein ?? 0;
     return { ...rawLog, calories, protein };
   };
@@ -118,7 +119,7 @@ export function CalendarView({
               <MiniStat icon="restaurant" value={`${selectedMeals}`} label="meals" />
               <MiniStat icon="local-fire-department" value={`${cardioPlan.burnedCalories}`} label="cal" />
             </View>
-            <Text style={styles.statusText} numberOfLines={1}>
+            <Text style={styles.statusText} numberOfLines={2}>
               {status.reason}
             </Text>
           </>
