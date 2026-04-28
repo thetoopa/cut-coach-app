@@ -14,18 +14,19 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.yourname.caloriecounter"
+      "bundleIdentifier": "com.toopa.caloriecounter"
     },
     "android": {
       "package": "com.yourname.caloriecounter"
     },
     "extra": {
       "eas": {
-        "projectId": "replace-after-eas-init"
+        "projectId": "078bb9f4-d79b-4af2-b104-a27ca6c8f5fe"
       }
     },
     "plugins": [
       "expo-font"
-    ]
+    ],
+    "owner": "thetoopa"
   }
 }
