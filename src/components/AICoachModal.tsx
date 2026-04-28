@@ -12,40 +12,80 @@ import {
   ActivityIndicator,
   FlatList,
   Vibration,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { sendChatMessage, parseMealPlanFromResponse, ChatMessage, MealPlanResponse } from '../services/openaiService';
+import { sendChatMessage, parseMealPlanFromResponse, parseWorkoutRoutineFromResponse, ChatMessage, MealPlanResponse, WorkoutRoutineResponse, ProfileContext, DayContext, MealCatalogItem } from '../services/openaiService';
 
 interface AICoachModalProps {
   visible: boolean;
   profile: any;
+  mode?: 'nutrition' | 'workout';
+  workouts?: any[];
+  dayContext?: DayContext;
+  currentMeals?: MealCatalogItem[];
   onClose: () => void;
   onSaveMeals: (meals: any[]) => void;
+  onSaveWorkout?: (workouts: any[]) => void;
 }
 
-export function AICoachModal({ visible, profile, onClose, onSaveMeals }: AICoachModalProps) {
+export function AICoachModal({ visible, profile, mode = 'nutrition', workouts = [], dayContext, currentMeals = [], onClose, onSaveMeals, onSaveWorkout }: AICoachModalProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [userInput, setUserInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [mealPlanResult, setMealPlanResult] = useState<MealPlanResponse | null>(null);
+  const [workoutRoutineResult, setWorkoutRoutineResult] = useState<WorkoutRoutineResponse | null>(null);
+  const [mealCount, setMealCount] = useState('8');
+  const [physiqueFocus, setPhysiqueFocus] = useState('lean, athletic physique with broader shoulders, upper chest, back width, arms, and a tight waist');
+  const [equipmentAccess, setEquipmentAccess] = useState('full gym with barbells, dumbbells, cables, machines, and cardio equipment');
+  const [likedTraining, setLikedTraining] = useState('bench, dumbbells, cables, machines, incline walking');
+  const [trainingLimits, setTrainingLimits] = useState('no major injuries; avoid anything that causes joint pain');
+  const [timePerWorkout, setTimePerWorkout] = useState('45-60 minutes');
   const scrollViewRef = useRef<ScrollView>(null);
 
-  // Initial greeting
   useEffect(() => {
-    if (visible && messages.length === 0) {
+    if (visible) {
       const greeting: ChatMessage = {
         role: 'assistant',
-        content: `Hi ${profile.name}! 👋 I'm your AI Nutrition Coach. I'm here to create a personalized meal plan based on your goals and preferences.\n\nTell me:\n1. What are your current fitness goals? (cutting, bulking, maintaining?)\n2. Any foods you love or can't stand?\n3. Dietary restrictions or allergies?\n\nLet's build the perfect meal plan for you!`,
+        content: mode === 'workout'
+          ? `Hi ${profile.name}. I already have your goal, calorie target, protein target, body stats, and planned gym days.\n\nI can build a full routine you can save into the Workout tab, review your current plan, swap exercises you dislike, or add realistic cardio if you went over calories.\n\nBefore saving a full plan, I may ask about workout length, equipment, injuries, exercises you refuse, and exercises you like. After I draft a plan, you can tell me what to replace before tapping Save as My Routine.`
+          : `Hi ${profile.name}. I already have your goal, calorie target, protein target, body stats, weekly loss rate, and gym schedule.\n\nToday you have about ${Math.round(dayContext?.caloriesLeft ?? 0)} calories left and ${Math.round(dayContext?.proteinLeft ?? 0)}g protein left. I can suggest quick snacks for those numbers, or generate a batch of new meal options that get added to your Meals tab. I also avoid repeating meals already in your current menu. When meals appear below, you can add one meal or add all of them.`,
       };
       setMessages([greeting]);
+      setUserInput('');
+      setMealPlanResult(null);
+      setWorkoutRoutineResult(null);
+      setMealCount('8');
     }
-  }, [visible]);
+  }, [visible, mode, profile.name, profile.gymDaysPerWeek, dayContext?.caloriesLeft, dayContext?.proteinLeft, dayContext?.cardioRemaining]);
 
-  const handleSendMessage = async () => {
-    if (!userInput.trim() || loading) return;
+  const buildProfileContext = (): ProfileContext => {
+    const inferredGoal =
+      profile.goalWeight && profile.goalWeight < profile.weight ? 'cut' :
+      profile.goalWeight && profile.goalWeight > profile.weight ? 'bulk' :
+      'maintain';
+
+    return {
+      name: profile.name || 'User',
+      goal: profile.goal || inferredGoal,
+      calorieGoal: profile.calorieGoal || 1900,
+      proteinGoal: profile.proteinGoal || 150,
+      age: profile.age || 25,
+      weight: profile.weight || 180,
+      goalWeight: profile.goalWeight,
+      heightIn: profile.heightIn,
+      weeklyLossRate: profile.weeklyLossRate ?? 1,
+      gymDaysPerWeek: profile.gymDaysPerWeek ?? 4,
+      activity: profile.activity,
+      sex: profile.sex || 'male',
+    };
+  };
+
+  const sendMessageToAI = async (userMessage: string, mealBatchCount?: number) => {
+    if (!userMessage.trim() || loading) return;
 
     Vibration.vibrate(50);
-    const userMessage = userInput.trim();
     setUserInput('');
 
     // Add user message to chat
@@ -57,17 +97,25 @@ export function AICoachModal({ visible, profile, onClose, onSaveMeals }: AICoach
     setLoading(true);
 
     try {
-      // Send to OpenAI
+      const profileContext = buildProfileContext();
+
+      // Send to OpenAI with profile context
       const response = await sendChatMessage(
         messages,
-        userMessage
+        userMessage,
+        profileContext,
+        mode,
+        workouts,
+        dayContext,
+        mealBatchCount,
+        mealBatchCount ? currentMeals : []
       );
 
-      // Check if response contains a meal plan
       const mealPlan = parseMealPlanFromResponse(response);
-      if (mealPlan) {
-        setMealPlanResult(mealPlan);
-      }
+      if (mealPlan) setMealPlanResult(mealPlan);
+
+      const workoutRoutine = parseWorkoutRoutineFromResponse(response);
+      if (workoutRoutine) setWorkoutRoutineResult(workoutRoutine);
 
       // Add assistant response
       const updatedMessages: ChatMessage[] = [
@@ -90,10 +138,50 @@ export function AICoachModal({ visible, profile, onClose, onSaveMeals }: AICoach
     }
   };
 
+  const handleSendMessage = async () => {
+    await sendMessageToAI(userInput.trim());
+  };
+
+  const handleBuildRoutine = async () => {
+    const request = `Build me a complete savable workout routine.
+
+Use my full profile:
+- Name: ${profile.name || 'User'}
+- Goal: ${profile.goal || 'cut'}
+- Current weight: ${profile.weight} lb
+- Goal weight: ${profile.goalWeight ?? 'not specified'} lb
+- Height: ${profile.heightIn ?? 'not specified'} in
+- Age: ${profile.age ?? 'not specified'}
+- Sex: ${profile.sex ?? 'not specified'}
+- Daily calories: ${profile.calorieGoal ?? 'not specified'}
+- Daily protein: ${profile.proteinGoal ?? 'not specified'}g
+- Weekly weight loss target: ${profile.weeklyLossRate ?? 1} lb/week
+- Planned gym days: ${profile.gymDaysPerWeek ?? 4} days/week
+- Calories left today: ${Math.round(dayContext?.caloriesLeft ?? 0)}
+- Protein left today: ${Math.round(dayContext?.proteinLeft ?? 0)}g
+- Cardio remaining today: ${Math.round(dayContext?.cardioRemaining ?? 0)} calories
+- Time available per workout: ${timePerWorkout}
+
+My ideal physique: ${physiqueFocus}
+Equipment available: ${equipmentAccess}
+Exercises/training I like: ${likedTraining}
+Limitations, injuries, dislikes, or substitutions needed: ${trainingLimits}
+
+If you need more detail before creating a high-confidence plan, ask me targeted questions first. Otherwise build a ${profile.gymDaysPerWeek ?? 4}-day weekly routine that preserves muscle during fat loss, develops the ideal physique above, covers every major muscle group, avoids lazy workouts, includes backups, and returns the strict savable JSON format.`;
+
+    await sendMessageToAI(request);
+  };
+
+  const handleBuildMealBatch = async () => {
+    const count = Math.max(3, Math.min(20, Number(mealCount) || 8));
+    const request = `Generate ${count} new meal options for my meal menu. Do not repeat meals already in my current menu. Make them ready to save into the app as selectable meal options.`;
+    await sendMessageToAI(request, count);
+  };
+
   const handleSaveMealPlan = () => {
     if (!mealPlanResult) return;
 
-    const customMeals = mealPlanResult.meals.map((meal, idx) => ({
+    onSaveMeals(mealPlanResult.meals.map((meal, idx) => ({
       id: `ai-${Date.now()}-${idx}`,
       name: meal.name,
       type: meal.type as 'Breakfast' | 'Lunch' | 'Dinner' | 'Snack',
@@ -102,11 +190,33 @@ export function AICoachModal({ visible, profile, onClose, onSaveMeals }: AICoach
       carbs: meal.carbs,
       fat: meal.fat,
       notes: `${meal.description}\n\n${meal.notes}`,
-    }));
+    })));
 
-    onSaveMeals(customMeals);
     Vibration.vibrate([0, 100, 50, 100]);
-    // Show confirmation
+    setTimeout(() => {
+      onClose();
+    }, 500);
+  };
+
+  const handleSaveSingleMeal = (meal: MealPlanResponse['meals'][number], idx: number) => {
+    onSaveMeals([{
+      id: `ai-${Date.now()}-${idx}`,
+      name: meal.name,
+      type: meal.type as 'Breakfast' | 'Lunch' | 'Dinner' | 'Snack',
+      calories: meal.calories,
+      protein: meal.protein,
+      carbs: meal.carbs,
+      fat: meal.fat,
+      notes: `${meal.description}\n\n${meal.notes}`,
+    }]);
+    Vibration.vibrate(50);
+  };
+
+  const handleSaveWorkoutRoutine = () => {
+    if (!workoutRoutineResult || !onSaveWorkout) return;
+
+    onSaveWorkout(workoutRoutineResult.workouts);
+    Vibration.vibrate([0, 100, 50, 100]);
     setTimeout(() => {
       onClose();
     }, 500);
@@ -115,23 +225,71 @@ export function AICoachModal({ visible, profile, onClose, onSaveMeals }: AICoach
   return (
     <Modal visible={visible} animationType="slide">
       <SafeAreaView style={styles.container}>
-        {/* Header */}
-        <View style={styles.header}>
-          <Pressable onPress={onClose} style={styles.closeButton}>
-            <MaterialIcons name="close" size={24} color="#fff" />
-          </Pressable>
-          <Text style={styles.title}>AI Nutrition Coach</Text>
-          <View style={{ width: 40 }} />
-        </View>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
+          style={styles.keyboardAvoid}
+        >
+          {/* Header */}
+          <View style={styles.header}>
+            <Pressable onPress={onClose} style={styles.closeButton}>
+              <MaterialIcons name="close" size={24} color="#fff" />
+            </Pressable>
+            <Text style={styles.title}>{mode === 'workout' ? 'Workout AI' : 'CalorieCounter AI'}</Text>
+            <View style={{ width: 40 }} />
+          </View>
 
-        {/* Chat Area */}
-        <ScrollView
+          {/* Chat Area */}
+          <ScrollView
           ref={scrollViewRef}
           style={styles.chatArea}
+          contentContainerStyle={styles.chatContent}
+          keyboardShouldPersistTaps="handled"
           onContentSizeChange={() =>
             scrollViewRef.current?.scrollToEnd({ animated: true })
           }
         >
+          {mode === 'workout' && (
+            <View style={styles.builderPanel}>
+              <Text style={styles.builderTitle}>Build My Routine</Text>
+              <Text style={styles.builderHelp}>Customize what you want and what your gym has. Ask for questions first if you want the AI to interview you before drafting. When a routine appears below, you can replace your current workout regime or ask for substitutions first.</Text>
+              <Text style={styles.fieldLabel}>Time per workout</Text>
+              <TextInput style={styles.builderInput} value={timePerWorkout} onChangeText={setTimePerWorkout} multiline placeholderTextColor="#64748b" />
+              <Text style={styles.fieldLabel}>Ideal physique</Text>
+              <TextInput style={styles.builderInput} value={physiqueFocus} onChangeText={setPhysiqueFocus} multiline placeholderTextColor="#64748b" />
+              <Text style={styles.fieldLabel}>Gym equipment</Text>
+              <TextInput style={styles.builderInput} value={equipmentAccess} onChangeText={setEquipmentAccess} multiline placeholderTextColor="#64748b" />
+              <Text style={styles.fieldLabel}>Exercises you like</Text>
+              <TextInput style={styles.builderInput} value={likedTraining} onChangeText={setLikedTraining} multiline placeholderTextColor="#64748b" />
+              <Text style={styles.fieldLabel}>Limits or dislikes</Text>
+              <TextInput style={styles.builderInput} value={trainingLimits} onChangeText={setTrainingLimits} multiline placeholderTextColor="#64748b" />
+              <Pressable onPress={handleBuildRoutine} disabled={loading} style={[styles.saveMealPlanButton, loading && styles.sendButtonDisabled]}>
+                <MaterialIcons name="auto-awesome" size={18} color="#052e1c" />
+                <Text style={styles.saveMealPlanText}>Build Routine</Text>
+              </Pressable>
+            </View>
+          )}
+
+          {mode === 'nutrition' && (
+            <View style={styles.builderPanel}>
+              <Text style={styles.builderTitle}>Build Meal Options</Text>
+              <Text style={styles.builderHelp}>Choose how many new meal options you want. The AI will use your profile, today's remaining calories/protein, and the meals already in your menu so it does not repeat them.</Text>
+              <Text style={styles.fieldLabel}>How many meal options?</Text>
+              <TextInput
+                style={styles.builderInput}
+                value={mealCount}
+                onChangeText={setMealCount}
+                keyboardType="numeric"
+                placeholderTextColor="#64748b"
+              />
+              <Text style={styles.builderHint}>Current meal menu: {currentMeals.length} saved options</Text>
+              <Pressable onPress={handleBuildMealBatch} disabled={loading} style={[styles.saveMealPlanButton, loading && styles.sendButtonDisabled]}>
+                <MaterialIcons name="restaurant-menu" size={18} color="#052e1c" />
+                <Text style={styles.saveMealPlanText}>Generate Meal Options</Text>
+              </Pressable>
+            </View>
+          )}
+
           {messages.map((msg, idx) => (
             <View
               key={idx}
@@ -156,10 +314,10 @@ export function AICoachModal({ visible, profile, onClose, onSaveMeals }: AICoach
           ))}
 
           {/* Meal Plan Result */}
-          {mealPlanResult && (
+          {mode === 'nutrition' && mealPlanResult && (
             <View style={styles.mealPlanContainer}>
-              <Text style={styles.mealPlanTitle}>📋 Your Meal Plan</Text>
-              <Text style={styles.mealPlanSummary}>{mealPlanResult.summary}</Text>
+              <Text style={styles.mealPlanTitle}>Importable Meal Options</Text>
+              <Text style={styles.mealPlanSummary}>{mealPlanResult.summary} Add one meal or add all meals to make them selectable in your Meals tab.</Text>
 
               <View style={styles.mealPlanStats}>
                 <View style={styles.statBox}>
@@ -186,13 +344,17 @@ export function AICoachModal({ visible, profile, onClose, onSaveMeals }: AICoach
                     <Text style={styles.macro}>{meal.carbs}g C</Text>
                     <Text style={styles.macro}>{meal.fat}g F</Text>
                   </View>
-                  {meal.notes && <Text style={styles.mealNotes}>📌 {meal.notes}</Text>}
+                  {meal.notes && <Text style={styles.mealNotes}>{meal.notes}</Text>}
+                  <Pressable onPress={() => handleSaveSingleMeal(meal, idx)} style={styles.saveSingleButton}>
+                    <MaterialIcons name="add-circle-outline" size={16} color="#34d399" />
+                    <Text style={styles.saveSingleText}>Add this meal</Text>
+                  </Pressable>
                 </View>
               ))}
 
               {mealPlanResult.recommendations.length > 0 && (
                 <View style={styles.recommendationsBox}>
-                  <Text style={styles.recTitle}>💡 Recommendations:</Text>
+                  <Text style={styles.recTitle}>Recommendations</Text>
                   {mealPlanResult.recommendations.map((rec, idx) => (
                     <Text key={idx} style={styles.recItem}>
                       • {rec}
@@ -206,8 +368,58 @@ export function AICoachModal({ visible, profile, onClose, onSaveMeals }: AICoach
                 style={styles.saveMealPlanButton}
               >
                 <MaterialIcons name="save" size={18} color="#fff" />
-                <Text style={styles.saveMealPlanText}>Save to My Meals</Text>
+                <Text style={styles.saveMealPlanText}>Add All Meals</Text>
               </Pressable>
+            </View>
+          )}
+
+          {mode === 'nutrition' && messages.length > 1 && !mealPlanResult && (
+            <View style={styles.importHintBox}>
+              <Text style={styles.importHintTitle}>Want to save meals?</Text>
+              <Text style={styles.importHintText}>Ask: “Return these as app-importable meal JSON.” Then each meal will show an Add this meal button.</Text>
+            </View>
+          )}
+
+          {mode === 'workout' && workoutRoutineResult && (
+            <View style={styles.mealPlanContainer}>
+              <Text style={styles.mealPlanTitle}>Generated Routine</Text>
+              <Text style={styles.mealPlanSummary}>{workoutRoutineResult.summary}</Text>
+              <View style={styles.recommendationsBox}>
+                <Text style={styles.recTitle}>Physique Focus</Text>
+                <Text style={styles.recItem}>{workoutRoutineResult.physiqueFocus}</Text>
+              </View>
+              {workoutRoutineResult.weeklySchedule.length > 0 && (
+                <View style={styles.recommendationsBox}>
+                  <Text style={styles.recTitle}>Weekly Schedule</Text>
+                  {workoutRoutineResult.weeklySchedule.map((item, idx) => <Text key={idx} style={styles.recItem}>• {item}</Text>)}
+                </View>
+              )}
+              {workoutRoutineResult.workouts.map((workout) => (
+                <View key={workout.id} style={styles.mealCard}>
+                  <Text style={styles.mealName}>{workout.name}</Text>
+                  <Text style={styles.mealDesc}>{workout.exercises.length} exercises · {workout.cardioMin} min cardio</Text>
+                  {workout.exercises.slice(0, 6).map((exercise) => (
+                    <Text key={exercise.id} style={styles.recItem}>• {exercise.name}: {exercise.sets}x{exercise.minReps}-{exercise.maxReps}</Text>
+                  ))}
+                </View>
+              ))}
+              {workoutRoutineResult.progressionRules.length > 0 && (
+                <View style={styles.recommendationsBox}>
+                  <Text style={styles.recTitle}>Progression</Text>
+                  {workoutRoutineResult.progressionRules.map((rule, idx) => <Text key={idx} style={styles.recItem}>• {rule}</Text>)}
+                </View>
+              )}
+              <Pressable onPress={handleSaveWorkoutRoutine} style={styles.saveMealPlanButton}>
+                <MaterialIcons name="save" size={18} color="#052e1c" />
+                <Text style={styles.saveMealPlanText}>Use as Current Workout Regime</Text>
+              </Pressable>
+            </View>
+          )}
+
+          {mode === 'workout' && messages.length > 1 && !workoutRoutineResult && (
+            <View style={styles.importHintBox}>
+              <Text style={styles.importHintTitle}>Want to save a routine?</Text>
+              <Text style={styles.importHintText}>Ask: “Return this as app-importable workout JSON.” When the plan appears, you can replace your current workout regime with it and still ask for substitutions first.</Text>
             </View>
           )}
 
@@ -219,17 +431,18 @@ export function AICoachModal({ visible, profile, onClose, onSaveMeals }: AICoach
           )}
 
           <View style={{ height: 20 }} />
-        </ScrollView>
+          </ScrollView>
 
-        {/* Input Area */}
-        <View style={styles.inputContainer}>
+          {/* Input Area */}
+          <View style={styles.inputContainer}>
           <TextInput
             style={styles.input}
-            placeholder="Tell the AI about your food preferences..."
+            placeholder={mode === 'workout' ? 'Ask for routine help or calorie makeup...' : 'Ask for snacks that fit your calories/protein...'}
             placeholderTextColor="#64748b"
             value={userInput}
             onChangeText={setUserInput}
             multiline
+            blurOnSubmit={false}
             editable={!loading}
           />
           <Pressable
@@ -247,6 +460,7 @@ export function AICoachModal({ visible, profile, onClose, onSaveMeals }: AICoach
             />
           </Pressable>
         </View>
+        </KeyboardAvoidingView>
       </SafeAreaView>
     </Modal>
   );
@@ -256,6 +470,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#0b0f14',
+  },
+  keyboardAvoid: {
+    flex: 1,
   },
   header: {
     flexDirection: 'row',
@@ -277,7 +494,10 @@ const styles = StyleSheet.create({
   chatArea: {
     flex: 1,
     paddingHorizontal: 16,
+  },
+  chatContent: {
     paddingVertical: 12,
+    paddingBottom: 24,
   },
   messageBubble: {
     marginVertical: 8,
@@ -409,6 +629,22 @@ const styles = StyleSheet.create({
     color: '#fbbf24',
     marginTop: 4,
   },
+  saveSingleButton: {
+    marginTop: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#34d399',
+    paddingVertical: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 6,
+  },
+  saveSingleText: {
+    color: '#34d399',
+    fontSize: 12,
+    fontWeight: '800',
+  },
   recommendationsBox: {
     backgroundColor: '#0b1220',
     borderRadius: 8,
@@ -416,6 +652,25 @@ const styles = StyleSheet.create({
     borderLeftColor: '#fbbf24',
     padding: 10,
     marginVertical: 12,
+  },
+  importHintBox: {
+    backgroundColor: '#0b1220',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#243244',
+    padding: 12,
+    marginVertical: 8,
+  },
+  importHintTitle: {
+    color: '#f8fafc',
+    fontSize: 13,
+    fontWeight: '800',
+    marginBottom: 4,
+  },
+  importHintText: {
+    color: '#94a3b8',
+    fontSize: 12,
+    lineHeight: 18,
   },
   recTitle: {
     fontSize: 13,
@@ -428,6 +683,48 @@ const styles = StyleSheet.create({
     color: '#cbd5e1',
     marginBottom: 4,
     lineHeight: 18,
+  },
+  builderPanel: {
+    backgroundColor: '#111827',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#243244',
+    padding: 14,
+    marginBottom: 12,
+  },
+  builderTitle: {
+    color: '#fff',
+    fontSize: 17,
+    fontWeight: '800',
+    marginBottom: 6,
+  },
+  builderHelp: {
+    color: '#94a3b8',
+    fontSize: 12,
+    lineHeight: 18,
+    marginBottom: 10,
+  },
+  fieldLabel: {
+    color: '#cbd5e1',
+    fontSize: 12,
+    fontWeight: '800',
+    marginBottom: 5,
+  },
+  builderInput: {
+    backgroundColor: '#0b1220',
+    borderWidth: 1,
+    borderColor: '#243244',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    color: '#fff',
+    minHeight: 42,
+    marginBottom: 10,
+  },
+  builderHint: {
+    color: '#94a3b8',
+    fontSize: 11,
+    marginTop: -4,
   },
   saveMealPlanButton: {
     backgroundColor: '#34d399',
@@ -457,9 +754,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 10,
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingTop: 12,
+    paddingBottom: Platform.OS === 'ios' ? 18 : 12,
     borderTopWidth: 1,
     borderTopColor: '#1f2937',
+    backgroundColor: '#0b0f14',
   },
   input: {
     flex: 1,

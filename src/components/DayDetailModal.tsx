@@ -1,5 +1,5 @@
 // src/components/DayDetailModal.tsx
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -9,12 +9,12 @@ import {
   Pressable,
   TextInput,
   SafeAreaView,
-  Dimensions,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { getDayStatus, ColorMap } from '../utils/colorScheme';
 import { getDateString, getDayOfWeekShort } from '../utils/dateHelpers';
 import { SoundManager, ConfettiEffect } from '../utils/soundAndHaptics';
+import { calculateCardioPlan, calculateEffectiveCalorieGoal, calculateWaterPlan } from '../utils/calculations';
 
 interface DayDetailModalProps {
   visible: boolean;
@@ -38,10 +38,20 @@ export function DayDetailModal({
   const [editLog, setEditLog] = useState(dayLog);
   const [showConfetti, setShowConfetti] = useState(false);
 
+  useEffect(() => {
+    setEditLog(dayLog);
+  }, [dayLog, visible]);
+
   const status = getDayStatus(editLog, profile);
   const selected = allMeals.filter((m) => editLog.selectedMeals?.includes(m.id)) ?? [];
   const mealCals = selected.reduce((a: number, m: any) => a + m.calories, 0);
   const mealProtein = selected.reduce((a: number, m: any) => a + m.protein, 0);
+  
+  // Cardio tracking
+  const cardioPlan = calculateCardioPlan(editLog, profile);
+  const cardioStatus = cardioPlan.burnedCalories >= cardioPlan.targetCalories ? 'green' : cardioPlan.burnedCalories >= cardioPlan.targetCalories * 0.5 ? 'yellow' : 'red';
+  const waterPlan = calculateWaterPlan(editLog, profile);
+  const effectiveCalories = calculateEffectiveCalorieGoal(profile, editLog);
 
   const handleSave = () => {
     onSave(editLog);
@@ -102,7 +112,7 @@ export function DayDetailModal({
               <View style={styles.macroBox}>
                 <Text style={styles.macroLabel}>Remaining</Text>
                 <Text style={styles.macroValue}>
-                  {Math.max(0, profile.calorieGoal - mealCals)}
+                  {Math.max(0, effectiveCalories.goal - mealCals)}
                 </Text>
                 <Text style={styles.macroGoal}>cals left</Text>
               </View>
@@ -123,17 +133,10 @@ export function DayDetailModal({
               }
             />
             <InputField
-              label="Steps"
-              value={String(editLog.steps ?? 0)}
-              onChange={(v) =>
-                setEditLog((log: any) => ({ ...log, steps: parseInt(v) || 0 }))
-              }
-            />
-            <InputField
               label="Outdoor walk (min)"
               value={String(editLog.outdoorWalk ?? 0)}
               onChange={(v) =>
-                setEditLog((log: any) => ({ ...log, outdoorWalk: parseInt(v) || 0 }))
+                setEditLog((log: any) => ({ ...log, outdoorWalk: parseInt(v) || 0, cardioBurnedCalories: undefined }))
               }
             />
             <InputField
@@ -143,14 +146,129 @@ export function DayDetailModal({
                 setEditLog((log: any) => ({
                   ...log,
                   inclineWalk: parseInt(v) || 0,
+                  cardioBurnedCalories: undefined,
                 }))
               }
             />
+            <Text style={styles.helpText}>Estimated cardio burn: {cardioPlan.estimatedCardioCalories} calories.</Text>
+            <InputField
+              label="Actual cardio calories"
+              value={String(editLog.cardioBurnedCalories ?? '')}
+              onChange={(v) =>
+                setEditLog((log: any) => ({
+                  ...log,
+                  cardioBurnedCalories: v === '' ? undefined : parseInt(v) || 0,
+                }))
+              }
+            />
+            <InputField
+              label="Other burned calories"
+              value={String(editLog.otherBurnedCalories ?? 0)}
+              onChange={(v) =>
+                setEditLog((log: any) => ({
+                  ...log,
+                  otherBurnedCalories: parseInt(v) || 0,
+                }))
+              }
+            />
+            <ToggleButton
+              label="Golf day"
+              active={editLog.golf ?? false}
+              onPress={() =>
+                setEditLog((log: any) => ({ ...log, golf: !log.golf }))
+              }
+            />
+            {editLog.golf && (
+              <>
+                <View style={styles.modeRow}>
+                  <SmallPill
+                    label="Riding"
+                    active={(editLog.golfMode ?? 'riding') === 'riding'}
+                    onPress={() => setEditLog((log: any) => ({ ...log, golfMode: 'riding' }))}
+                  />
+                  <SmallPill
+                    label="Walking"
+                    active={editLog.golfMode === 'walking'}
+                    onPress={() => setEditLog((log: any) => ({ ...log, golfMode: 'walking' }))}
+                  />
+                </View>
+                <InputField
+                  label="Golf holes"
+                  value={String(editLog.golfHoles ?? 18)}
+                  onChange={(v) =>
+                    setEditLog((log: any) => ({
+                      ...log,
+                      golfHoles: parseInt(v) || 0,
+                      golfBurnedCalories: undefined,
+                    }))
+                  }
+                />
+                <Text style={styles.helpText}>Estimated golf burn: {cardioPlan.estimatedGolfCalories} calories.</Text>
+                <InputField
+                  label="Actual golf calories"
+                  value={String(editLog.golfBurnedCalories ?? '')}
+                  onChange={(v) =>
+                    setEditLog((log: any) => ({
+                      ...log,
+                      golfBurnedCalories: v === '' ? undefined : parseInt(v) || 0,
+                    }))
+                  }
+                />
+              </>
+            )}
+            <View style={[styles.cardioBox, { borderColor: ColorMap[cardioStatus] }]}>
+              <View style={styles.cardioHeader}>
+                <View>
+                  <Text style={styles.cardioLabel}>Cardio progress</Text>
+                  <Text style={styles.cardioValue}>{cardioPlan.burnedCalories}/{cardioPlan.targetCalories} cal</Text>
+                </View>
+                <MaterialIcons name="favorite" size={22} color={ColorMap[cardioStatus]} />
+              </View>
+              <View style={styles.progressTrack}>
+                <View style={[styles.progressFill, { width: `${cardioPlan.progress * 100}%`, backgroundColor: ColorMap[cardioStatus] }]} />
+              </View>
+              <Text style={styles.cardioNote}>
+                Heart-rate zone: {cardioPlan.heartRateZone.minHR}-{cardioPlan.heartRateZone.maxHR} bpm. Based on your {cardioPlan.lossOption.label} loss goal.
+              </Text>
+              <Text style={styles.cardioNote}>Remaining: {cardioPlan.remainingCalories} calories, about {cardioPlan.outdoorMinutesNeeded} flat min or {cardioPlan.inclineMinutesNeeded} incline min.</Text>
+              {editLog.golf && <Text style={styles.cardioNote}>Golf credit: {cardioPlan.golfCalories} calories.</Text>}
+              {(editLog.otherBurnedCalories ?? 0) > 0 && <Text style={styles.cardioNote}>Other activity credit: {cardioPlan.otherCalories} calories.</Text>}
+            </View>
+            <InputField
+              label="Water (oz)"
+              value={String(editLog.waterOz ?? 0)}
+              onChange={(v) =>
+                setEditLog((log: any) => ({ ...log, waterOz: parseInt(v) || 0 }))
+              }
+            />
+            <View style={styles.waterBox}>
+              <View style={styles.cardioHeader}>
+                <View>
+                  <Text style={styles.cardioLabel}>Water progress</Text>
+                  <Text style={styles.cardioValue}>{waterPlan.loggedOunces}/{waterPlan.targetOunces} oz</Text>
+                </View>
+                <MaterialIcons name="opacity" size={22} color="#38bdf8" />
+              </View>
+              <View style={styles.progressTrack}>
+                <View style={[styles.progressFill, { width: `${waterPlan.progress * 100}%`, backgroundColor: '#38bdf8' }]} />
+              </View>
+              <Text style={styles.cardioNote}>Remaining: {waterPlan.remainingOunces} oz. Target: {waterPlan.liters} L.</Text>
+            </View>
           </View>
 
           {/* Activity Toggles */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>✓ Activities</Text>
+            <ToggleButton
+              label="Lift planned"
+              active={editLog.plannedLift ?? true}
+              onPress={() =>
+                setEditLog((log: any) => ({
+                  ...log,
+                  plannedLift: !(log.plannedLift ?? true),
+                }))
+              }
+            />
             <ToggleButton
               label="Workout completed"
               active={editLog.workoutDone ?? false}
@@ -161,11 +279,15 @@ export function DayDetailModal({
                 }))
               }
             />
-            <ToggleButton
-              label="Golf day"
-              active={editLog.golf ?? false}
-              onPress={() =>
-                setEditLog((log: any) => ({ ...log, golf: !log.golf }))
+            <Text style={styles.helpText}>Estimated lifting credit: {effectiveCalories.estimatedWorkoutCalories} calories. This is added to the food target only when workout completed is selected.</Text>
+            <InputField
+              label="Actual workout calories"
+              value={String(editLog.workoutBurnedCalories ?? '')}
+              onChange={(v) =>
+                setEditLog((log: any) => ({
+                  ...log,
+                  workoutBurnedCalories: v === '' ? undefined : parseInt(v) || 0,
+                }))
               }
             />
             <ToggleButton
@@ -319,6 +441,22 @@ function ToggleButton({
   );
 }
 
+function SmallPill({
+  label,
+  active,
+  onPress,
+}: {
+  label: string;
+  active: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable onPress={onPress} style={[styles.smallPill, active && styles.smallPillActive]}>
+      <Text style={[styles.smallPillText, active && styles.smallPillTextActive]}>{label}</Text>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -397,6 +535,86 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: '#64748b',
     marginTop: 2,
+  },
+  cardioBox: {
+    backgroundColor: '#111827',
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 12,
+    marginTop: 4,
+  },
+  waterBox: {
+    backgroundColor: '#111827',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#38bdf8',
+    padding: 12,
+    marginTop: 4,
+  },
+  cardioHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  cardioLabel: {
+    color: '#94a3b8',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  cardioValue: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: '900',
+    marginTop: 2,
+  },
+  progressTrack: {
+    height: 9,
+    backgroundColor: '#1f2937',
+    borderRadius: 999,
+    overflow: 'hidden',
+    marginTop: 12,
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: 999,
+  },
+  cardioNote: {
+    color: '#cbd5e1',
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 8,
+  },
+  helpText: {
+    color: '#64748b',
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: -4,
+    marginBottom: 10,
+  },
+  modeRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 12,
+  },
+  smallPill: {
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    backgroundColor: '#111827',
+    borderWidth: 1,
+    borderColor: '#243244',
+  },
+  smallPillActive: {
+    backgroundColor: '#34d399',
+    borderColor: '#34d399',
+  },
+  smallPillText: {
+    color: '#cbd5e1',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  smallPillTextActive: {
+    color: '#052e1c',
   },
   inputGroup: {
     marginBottom: 12,

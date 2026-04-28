@@ -1,6 +1,6 @@
-# Cut Coach
+# CalorieCounter
 
-A local-first Expo/React Native app for a customizable aggressive cut: meals, workouts, progressive overload, cardio, golf mode, and drinking-day budget.
+A local-first Expo/React Native app for calorie tracking, meals, workouts, progressive overload, cardio, golf mode, and drinking-day budget.
 
 ## Run it locally
 
@@ -28,19 +28,18 @@ For Android, the included `preview` profile creates an APK you can send to frien
 ## What is included
 
 - Profile: age, height, weight, goal weight, calorie/protein targets
-- Meal picker: dairy-avoidant preset meals based on your plan
+- Meal picker: preset meals plus manual meal creation
 - Drinking day mode: reserves calories per drink
 - Golf mode: lowers cardio pressure and gives instructions
 - Workout tracker: Push/Pull/Legs/Upper split
 - Progressive overload: tells when to increase weight
 - Rest timer: 90/120/180 seconds
 - Backup workouts for missed gym days
-- Cardio plan: outdoor + incline treadmill tracking
+- Cardio plan: outdoor + incline treadmill minutes, progress, and heart-rate zone guidance
 - Local storage with AsyncStorage
 
 ## Next upgrades
 
-- Custom meal creation UI
 - Weekly trend charts
 - Friend profiles
 - Apple Health / Google Fit sync

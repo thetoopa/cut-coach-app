@@ -2,7 +2,7 @@
 // Date and calendar utilities
 
 export function todayKey(): string {
-  return new Date().toISOString().slice(0, 10);
+  return keyFromDate(new Date());
 }
 
 export function dateFromKey(dateKey: string): Date {
@@ -11,7 +11,10 @@ export function dateFromKey(dateKey: string): Date {
 }
 
 export function keyFromDate(date: Date): string {
-  return date.toISOString().slice(0, 10);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 export function getMonthDays(year: number, month: number): (number | null)[] {

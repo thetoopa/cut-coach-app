@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "Cut Coach",
-    "slug": "cut-coach",
+    "name": "CalorieCounter",
+    "slug": "calorie-counter",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -14,10 +14,10 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.yourname.cutcoach"
+      "bundleIdentifier": "com.yourname.caloriecounter"
     },
     "android": {
-      "package": "com.yourname.cutcoach"
+      "package": "com.yourname.caloriecounter"
     },
     "extra": {
       "eas": {

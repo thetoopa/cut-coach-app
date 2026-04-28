@@ -32,7 +32,7 @@
 #### 3. **Day Detail Modal** (`src/components/DayDetailModal.tsx`)
 - Full day logging interface
 - Macro summary cards (Calories, Protein, Carbs, Fat)
-- Quick log fields (weight, steps, walks, incline)
+- Quick log fields (weight, walks, incline)
 - Activity toggles (workout, golf, drinking)
 - Notes field
 - Meal selection display
@@ -61,7 +61,7 @@
 
 ### Data Persistence
 
-All data stored in AsyncStorage under `'cutCoach'` key:
+All current data is stored in AsyncStorage under the `calorieCounter` key. The app still reads the legacy `cutCoach` key during migration:
 ```javascript
 {
   profile: Profile,
@@ -80,7 +80,7 @@ All data stored in AsyncStorage under `'cutCoach'` key:
 2. **Day Modal**
    - Shows macro summary for that day
    - Allows adding/removing meals for that day
-   - Logs all metrics (weight, steps, activities, notes)
+   - Logs all metrics (weight, cardio minutes, activities, notes)
    - Auto-updates calendar cell color when saved
 
 3. **Color Logic**

@@ -1,6 +1,8 @@
 // src/utils/colorScheme.ts
 // Color-coding logic for DayLog entries
 
+import { calculateEffectiveCalorieGoal } from './calculations';
+
 export type DayStatus = 'green' | 'yellow' | 'red' | 'gray';
 
 export interface DayStatusBreakdown {
@@ -30,8 +32,23 @@ export function getDayStatus(
   profile: any, // Profile type
   tolerance: { calories: number; protein: number } = { calories: 100, protein: 10 }
 ): DayStatusBreakdown {
+  const hasAnyData = !!dayLog && (
+    (dayLog.selectedMeals?.length ?? 0) > 0 ||
+    (dayLog.calories ?? 0) > 0 ||
+    (dayLog.protein ?? 0) > 0 ||
+    (dayLog.weight ?? 0) > 0 ||
+    (dayLog.waterOz ?? 0) > 0 ||
+    (dayLog.outdoorWalk ?? 0) > 0 ||
+    (dayLog.inclineWalk ?? 0) > 0 ||
+    (dayLog.cardioBurnedCalories ?? 0) > 0 ||
+    (dayLog.golfBurnedCalories ?? 0) > 0 ||
+    (dayLog.otherBurnedCalories ?? 0) > 0 ||
+    dayLog.golf ||
+    dayLog.workoutDone
+  );
+
   // If no logging data at all
-  if (!dayLog || dayLog.date === '') {
+  if (!dayLog || dayLog.date === '' || !hasAnyData) {
     return {
       status: 'gray',
       reason: 'No data logged',
@@ -47,39 +64,45 @@ export function getDayStatus(
     };
   }
 
+  const activityCalories =
+    Math.max(0, Number(dayLog.cardioBurnedCalories) || 0) +
+    Math.max(0, Number(dayLog.golfBurnedCalories) || 0) +
+    Math.max(0, Number(dayLog.otherBurnedCalories) || 0) +
+    (dayLog.golf ? Math.max(1, Number(dayLog.golfHoles) || 0) : 0);
+  const cardioMinutes = (dayLog.outdoorWalk ?? 0) + (dayLog.inclineWalk ?? 0);
+
+  const effectiveCalories = calculateEffectiveCalorieGoal(profile, dayLog);
   const details = {
     hasCalories: (dayLog.calories ?? 0) > 0,
-    calorieStatus: getCalorieStatus(dayLog.calories ?? 0, profile.calorieGoal, tolerance.calories),
+    calorieStatus: getCalorieStatus(dayLog.calories ?? 0, effectiveCalories.goal, tolerance.calories),
     hasProtein: (dayLog.protein ?? 0) > 0,
     proteinStatus: getProteinStatus(dayLog.protein ?? 0, profile.proteinGoal, tolerance.protein),
     hasWorkout: dayLog.workoutDone ?? false,
-    hasCardio: (dayLog.outdoorWalk ?? 0) + (dayLog.inclineWalk ?? 0) > 0,
+    hasCardio: cardioMinutes > 0 || activityCalories > 0,
     hasLogging: true,
   };
 
   // Determine status
   let status: DayStatus = 'gray';
 
-  const loggingScore = [
-    details.hasCalories ? 1 : 0,
-    details.hasProtein ? 1 : 0,
-    (details.hasWorkout || details.hasCardio) ? 1 : 0,
-  ].reduce((a, b) => a + b, 0);
+  const isCalorieGreen =
+    profile.goal === 'cut'
+      ? (dayLog.calories ?? 0) >= effectiveCalories.goal - 300 && (dayLog.calories ?? 0) <= effectiveCalories.goal + tolerance.calories
+      : Math.abs((dayLog.calories ?? 0) - effectiveCalories.goal) <= tolerance.calories;
 
   const isOnTarget =
-    details.calorieStatus === 'target' &&
-    details.proteinStatus === 'target' &&
-    (details.hasWorkout || details.hasCardio);
+    isCalorieGreen &&
+    details.proteinStatus === 'target';
 
   // GREEN: Logged everything and on target
-  if (loggingScore === 3 && isOnTarget) {
+  if (details.hasCalories && details.hasProtein && isOnTarget) {
     status = 'green';
   }
   // RED: Exceeded significantly or missed multiple targets
   else if (
-    (details.calorieStatus === 'over' && (dayLog.calories ?? 0) > profile.calorieGoal + 200) ||
+    (details.calorieStatus === 'over' && (dayLog.calories ?? 0) > effectiveCalories.goal + 200) ||
     (details.proteinStatus === 'under' && (dayLog.protein ?? 0) < profile.proteinGoal - 20) ||
-    loggingScore <= 1
+    (!details.hasCalories && !details.hasProtein)
   ) {
     status = 'red';
   }

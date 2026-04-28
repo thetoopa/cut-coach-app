@@ -1,6 +1,6 @@
-# Cut Coach App - Development Roadmap
+# CalorieCounter App - Development Roadmap
 
-**Repository:** https://github.com/thetoopa/cut-coach-app.git  
+**Repository:** https://github.com/thetoopa/calorie-counter.git  
 **Tech Stack:** React Native (Expo), TypeScript, AsyncStorage  
 **Target:** iOS/Android fitness tracking with social features
 
@@ -16,14 +16,15 @@ A gamified, social fitness tracking app that helps users monitor nutrition, work
 ### Data Model
 ```
 User Profile (local + shared)
-├── Personal metrics (age, weight, goals, preferences)
+├── Personal metrics (age, weight, goals, weekly loss rate, gym frequency)
 ├── Nutrition targets (calories, macros)
 └── Workout preferences
 
 DayLog (date-based tracking)
 ├── Nutrition (meals, macros, calories)
 ├── Workouts (completed, exercises, performance)
-├── Cardio (steps, walks, incline walks)
+├── Cardio (calorie burn targets, walks, incline walks, golf, heart-rate zones)
+├── Hydration (smart water target and ounces logged)
 ├── Metrics (weight, mood, notes)
 └── Status indicators (color-coded: green/yellow/red)
 
@@ -98,21 +99,33 @@ src/
 - [x] Day detail modal showing full log
 - [x] Live streaks display
 - [x] Quick-log buttons (✓ check, confetti, sound)
+- [x] Separate Today snapshot and Calendar views
 
 ### Phase 2 (IN PROGRESS): Enhanced Meals System
 - [x] **AI Coach intake form** (NEW - conversational meal planning)
 - [x] Meal recommendations from AI
+- [x] Custom meal creation form
+- [x] AI meals use user goals, calorie target, protein target, and cut intensity
+- [x] AI meals use weekly loss target and planned lifting frequency
 - [ ] Meal favorites/bookmarks (manual UI)
-- [ ] Custom meal creation form
 - [ ] Meal sharing/templates with friends
 - [ ] Meal bank with filtering
 
-### Phase 3: Smart Workout Intelligence
+### Phase 3: Smart Cardio, Hydration & Workout Intelligence
+- [x] Cardio calorie-burn target instead of fixed minutes
+- [x] Activity-specific cardio estimates for flat walking, incline walking, and golf
+- [x] Weight-loss intake modes: 0.5, 1, 1.5, 2 lb/week with muscle-loss warnings
+- [x] Cardio burn target derived from selected weekly weight-loss goal
+- [x] Smart water target from weight, height, protein, cardio, golf, alcohol, and cut intensity
+- [x] Planned gym days per week during intake
+- [x] Missed-lift calorie adjustment on non-lifting days
+- [x] In-app workout timer and smart rest timer with vibration/alert
+- [x] Strength progression recommendations and apply-next-weight action
 - [ ] Current workout detection (remember last day)
-- [ ] Set timer with rest notifications
 - [ ] Exercise alternatives based on missing muscle groups
 - [ ] Smart rep/weight predictions
-- [ ] Health app integration (heart rate, steps)
+- [ ] Background local notifications for rest timers
+- [ ] Health app integration (heart rate and cardio minutes)
 
 ### Phase 4: Social & Data Sharing
 - [ ] User profiles with shareable links
@@ -162,7 +175,7 @@ src/
 - Logged calories within ±100 of goal
 - Logged protein within ±10g of goal
 - Workout completed OR cardio completed
-- Steps/activities logged
+- Cardio minutes and activities logged
 
 ### Yellow (Partial)
 - Logged but not all metrics entered
@@ -211,18 +224,23 @@ Change Request:
 - ✓ Core data types defined
 - ✓ AsyncStorage integration
 - ✓ Basic meal bank (15+ meals)
+- ✓ Manual meal creation
+- ✓ AI meal creator uses current goals and cut settings
 - ✓ Base workouts (Push/Pull/Legs/etc)
 - ✓ Tab navigation structure
+- ✓ Daily, weekly, monthly calendar views
+- ✓ Smart cardio burn target with golf credit
+- ✓ Smart water tracking
+- ✓ Weight-loss modes and gym-day intake
+- ✓ Workout/rest timer and progression recommendations
 - ⏳ UI components need modularization
-- ⏳ Calendar view incomplete
-- ⏳ Color-coding logic missing
 
 ---
 
 ## Next Immediate Steps
-1. Modularize components (create folder structure)
-2. Build Calendar component with color-coding
-3. Implement DayDetailModal
-4. Add confetti & sound effects
-5. Create metrics display component
-6. Add streak calculation logic
+1. Modularize the large `App.tsx` into focused screens/components
+2. Add meal favorites and filtering
+3. Add weekly trend charts for weight, calories, cardio burn, and water
+4. Improve color status logic to include cardio burn and water target completion
+5. Add workout history and automatic current workout detection
+6. Add background notifications for water, cardio, and rest timers

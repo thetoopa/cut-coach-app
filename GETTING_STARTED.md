@@ -1,4 +1,4 @@
-# 🏋️ Cut Coach - Phase 1 Complete! 🎉
+# CalorieCounter - Phase 1 Complete
 
 ## What You Got
 
@@ -15,7 +15,7 @@ Your fitness tracking app now has a **fully functional calendar + day logging sy
 ### 📝 Day Logging Modal
 Click any day to open a beautiful logging interface where you can:
 - **📊 View macros summary** (Calories, Protein, Carbs, Fat)
-- **⚖️ Log daily metrics** (weight, steps, cardio minutes)
+- **Log daily metrics** (weight and cardio minutes)
 - **🏃 Track activities** (workout completed, golf day, drinking day)
 - **🍽️ Select meals** (auto-adds macros)
 - **📌 Add notes** for the day
@@ -79,7 +79,7 @@ Adjust these in the **Profile tab**.
 - ⏱️ Set timer between sets with notifications
 - 💪 Exercise alternatives if you skip exercises
 - 📊 Smart rep/weight predictions
-- ❤️ Health app integration (heart rate, steps)
+- Health app integration (heart rate and cardio minutes)
 
 ### Phase 4 (Social features)
 - 👥 Friend profiles & comparison
@@ -126,7 +126,7 @@ Just describe what you want, and I'll implement it. Check [AI_WORKFLOW.md](AI_WO
 ## Files Structure
 
 ```
-cut-coach-app/
+calorie-counter/
 ├── App.tsx                          (Main app, updated with calendar)
 ├── src/
 │   ├── components/
@@ -169,7 +169,6 @@ Your logs are stored like this:
     protein: 165,
     carbs: 180,
     fat: 45,
-    steps: 8200,
     outdoorWalk: 25,
     inclineWalk: 15,
     weight: 168.5,
