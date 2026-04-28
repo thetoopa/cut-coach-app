@@ -17,10 +17,12 @@
       "bundleIdentifier": "com.toopa.caloriecounter",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
-      }
+      },
+      "buildNumber": "2"
     },
     "android": {
-      "package": "com.yourname.caloriecounter"
+      "package": "com.yourname.caloriecounter",
+      "versionCode": 2
     },
     "extra": {
       "eas": {
