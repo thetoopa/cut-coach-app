@@ -6,13 +6,47 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { CalendarView } from './src/components/CalendarView';
 import { DayDetailModal } from './src/components/DayDetailModal';
 import { AICoachModal } from './src/components/AICoachModal';
-import { OnboardingFlow } from './src/components/OnboardingFlow';
+import { EnhancedOnboardingFlow } from './src/components/EnhancedOnboardingFlow';
+import { MealEditModal } from './src/components/MealEditModal';
+import { ImportExportModal } from './src/components/ImportExportModal';
 import { calculateCardioPlan, calculateWaterPlan, WeeklyLossRate, calculateEffectiveCalorieGoal, calculateNutritionTargets, getProgressionRecommendation, suggestedRestSeconds, weeklyLossOptions } from './src/utils/calculations';
+import { parseMealJSON, parseWorkoutJSON } from './src/utils/exportImport';
 type Tab = 'Today' | 'Calendar' | 'Meals' | 'Workout' | 'Cardio' | 'Water' | 'Grocery' | 'Weight' | 'Profile';
 type Meal = { id: string; name: string; type: 'Breakfast'|'Lunch'|'Dinner'|'Snack'; calories: number; protein: number; carbs: number; fat: number; notes: string; custom?: boolean };
 type Exercise = { id: string; name: string; sets: number; minReps: number; maxReps: number; weight: number; lastReps: number[]; backup?: string };
 type WorkoutDay = { id: string; name: string; exercises: Exercise[]; cardioMin: number; backup: string[] };
-type Profile = { name: string; goal?: 'cut'|'bulk'|'maintain'; age: number; sex: 'male'|'female'; heightIn: number; weight: number; goalWeight: number; activity: number; aggression: number; proteinGoal: number; calorieGoal: number; weeklyLossRate?: WeeklyLossRate; gymDaysPerWeek?: number };
+type MealPreferences = {
+  cookingTimePerMeal?: string;
+  favoriteProteins?: string[];
+  favoriteCarbs?: string[];
+  favoriteVeggies?: string[];
+  favoriteFruits?: string[];
+  allergies?: string;
+};
+type WorkoutPreferences = {
+  useDefaults?: boolean;
+  timePerWorkout?: string;
+  equipmentAccess?: string;
+  likedExercises?: string;
+  trainingLimits?: string;
+};
+type Profile = { 
+  name: string; 
+  goal?: 'cut'|'bulk'|'maintain'; 
+  age: number; 
+  sex: 'male'|'female'; 
+  heightIn: number; 
+  weight: number; 
+  goalWeight: number; 
+  activity: number; 
+  aggression: number; 
+  proteinGoal: number; 
+  calorieGoal: number; 
+  weeklyLossRate?: WeeklyLossRate; 
+  gymDaysPerWeek?: number;
+  mealPreferences?: MealPreferences;
+  workoutPreferences?: WorkoutPreferences;
+};
 type DayLog = { date: string; weight?: number; calories: number; protein: number; outdoorWalk: number; inclineWalk: number; cardioBurnedCalories?: number; golfBurnedCalories?: number; otherBurnedCalories?: number; workoutBurnedCalories?: number; golf: boolean; golfHoles?: number; golfMode?: 'riding'|'walking'; waterOz?: number; plannedLift?: boolean; drinking: boolean; drinks: number; workoutDone: boolean; selectedMeals: string[]; notes: string };
 type GroceryItem = { id: string; name: string; source: string; store: string; needed: boolean; bought: boolean };
 type WeightRange = 'Week' | 'Month' | 'Quarter' | 'Year' | 'All' | 'Custom';
@@ -108,6 +142,10 @@ export default function App(){
   const [showAIWorkout, setShowAIWorkout] = useState(false);
   const [showManualMeal, setShowManualMeal] = useState(false);
   const [manualMeal, setManualMeal] = useState<Meal>(blankMeal());
+  const [editingMeal, setEditingMeal] = useState<Meal | null>(null);
+  const [showMealEdit, setShowMealEdit] = useState(false);
+  const [showImportExportMeals, setShowImportExportMeals] = useState(false);
+  const [showImportExportWorkouts, setShowImportExportWorkouts] = useState(false);
   const [workoutRunning, setWorkoutRunning] = useState(false);
   const [workoutSeconds, setWorkoutSeconds] = useState(0);
   const [restSeconds, setRestSeconds] = useState(0);
@@ -297,6 +335,35 @@ export default function App(){
     setShowManualMeal(false);
   };
 
+  // Handle meal editing
+  const handleEditMeal = (meal: Meal) => {
+    setEditingMeal(meal);
+    setShowMealEdit(true);
+  };
+
+  const handleSaveEditedMeal = (updatedMeal: Meal) => {
+    setMealsState(current =>
+      current.map(m => m.id === updatedMeal.id ? updatedMeal : m)
+    );
+    setShowMealEdit(false);
+    setEditingMeal(null);
+  };
+
+  const handleDeleteMeal = (mealId: string) => {
+    setMealsState(current => current.filter(m => m.id !== mealId));
+    setLog(current => ({...current, selectedMeals: current.selectedMeals.filter(id => id !== mealId)}));
+  };
+
+  // Handle meal import
+  const handleImportMeals = (importedMeals: Meal[]) => {
+    setMealsState(current => [...current, ...importedMeals]);
+  };
+
+  // Handle workout import
+  const handleImportWorkouts = (importedWorkouts: WorkoutDay[]) => {
+    setWorkouts(current => [...current, ...importedWorkouts]);
+  };
+
   const toggleStore = (store: string) => {
     setSelectedStores(current => current.includes(store) ? current.filter(item => item !== store) : [...current, store]);
   };
@@ -351,7 +418,7 @@ export default function App(){
 
   // Show onboarding if user hasn't completed it
   if (!hasSeenOnboarding) {
-    return <OnboardingFlow onComplete={handleOnboardingComplete} />;
+    return <EnhancedOnboardingFlow onComplete={handleOnboardingComplete} />;
   }
 
   return <SafeAreaView style={s.app}><StatusBar style="light"/><View style={s.header}><Text style={s.title}>CalorieCounter</Text><Text style={s.sub}>Track, analyze, thrive</Text></View>
@@ -404,15 +471,21 @@ export default function App(){
             <Pressable style={{flex: 1}} onPress={() => setShowAICoach(true)}><View style={s.aiButton}><MaterialIcons name="smart-toy" size={16} color="#fff" /><Text style={s.aiButtonText}>Ask AI Coach</Text></View></Pressable>
             <Pressable style={{flex: 1}} onPress={() => setShowManualMeal(true)}><View style={s.manualButton}><MaterialIcons name="add-circle-outline" size={16} color="#cbd5e1" /><Text style={s.manualButtonText}>Add Meal</Text></View></Pressable>
           </View>
-          <Text style={s.note}>Tap meals to add/remove. These are your available meal options for the day. AI meals you save here will appear in this menu too.</Text>
+          <View style={{flexDirection: 'row', gap: 8, marginBottom: 12}}>
+            <Pressable style={{flex: 1}} onPress={() => setShowImportExportMeals(true)}><View style={s.manualButton}><MaterialIcons name="import-export" size={16} color="#cbd5e1" /><Text style={s.manualButtonText}>Import/Export</Text></View></Pressable>
+          </View>
+          <Text style={s.note}>Tap meals to add/remove for today. Long-press or tap the meal to edit/delete. AI meals and imports show with ✨.</Text>
         </Section>
-        {(['Breakfast','Lunch','Dinner','Snack'] as const).map(type=><Section key={type} title={type}>{mealsState.filter(m=>m.type===type).map(m=><Pressable key={m.id} onPress={()=>toggleMeal(m.id)} style={[s.meal, log.selectedMeals.includes(m.id)&&s.mealActive]}><Text style={s.mealTitle}>{m.name}{m.custom ? ' ✨' : ''}</Text><Text style={s.mealSub}>{m.calories} cal · {m.protein}g protein · {m.carbs}C/{m.fat}F</Text><Text style={s.note}>{m.notes}</Text></Pressable>)}</Section>)}
+        {(['Breakfast','Lunch','Dinner','Snack'] as const).map(type=><Section key={type} title={type}>{mealsState.filter(m=>m.type===type).map(m=><View key={m.id} style={{marginBottom:10}}><Pressable onPress={()=>toggleMeal(m.id)} style={[s.meal, log.selectedMeals.includes(m.id)&&s.mealActive]}><Text style={s.mealTitle}>{m.name}{m.custom ? ' ✨' : ''}</Text><Text style={s.mealSub}>{m.calories} cal · {m.protein}g protein · {m.carbs}C/{m.fat}F</Text><Text style={s.note}>{m.notes}</Text></Pressable><Pressable onPress={()=>handleEditMeal(m)} style={{paddingHorizontal:12,paddingVertical:6,backgroundColor:'#0b1220',borderRadius:8}}><Text style={{color:'#cbd5e1',fontWeight:'600',fontSize:12}}>Edit/Delete</Text></Pressable></View>)}</Section>)}
       </>}
 
       {tab==='Workout' && <>
         <Section title="Workout Guide">
           <Text style={s.note}>Start the workout timer when lifting begins. Log weight and reps for each set. Hit the suggested rest timer after hard sets. When every set reaches the top of the rep range, use Apply next to raise weight next session.</Text>
-          <Pressable onPress={() => setShowAIWorkout(true)}><View style={s.manualButton}><MaterialIcons name="fitness-center" size={16} color="#cbd5e1" /><Text style={s.manualButtonText}>AI Workout Review</Text></View></Pressable>
+          <View style={{flexDirection: 'row', gap: 8}}>
+            <Pressable style={{flex: 1}} onPress={() => setShowAIWorkout(true)}><View style={s.manualButton}><MaterialIcons name="fitness-center" size={16} color="#cbd5e1" /><Text style={s.manualButtonText}>AI Workout Review</Text></View></Pressable>
+            <Pressable style={{flex: 1}} onPress={() => setShowImportExportWorkouts(true)}><View style={s.manualButton}><MaterialIcons name="import-export" size={16} color="#cbd5e1" /><Text style={s.manualButtonText}>Import/Export</Text></View></Pressable>
+          </View>
         </Section>
         <Section title="Pick Workout"><View style={s.row}>{workouts.map((w,i)=><Pill key={w.id} active={i===selectedWorkout} onPress={()=>setSelectedWorkout(i)}>{w.name.split(' ')[0]}</Pill>)}</View></Section>
         <Section title={workouts[selectedWorkout].name}>
@@ -429,7 +502,12 @@ export default function App(){
             <View style={s.row}><Pill active={restSeconds > 0} onPress={()=>startRestTimer(restTime)}>Start {formatSeconds(restTime)} rest</Pill><Pill onPress={()=>applyProgression(selectedWorkout,ei)}>Apply next</Pill></View>
             <Text style={s.note}>{progressionText(e)} Backup: {e.backup}</Text></View>})}
         </Section>
-        <Section title="If You Miss Gym"><Text style={s.note}>{workouts[selectedWorkout].backup.map(x=>'• '+x).join('\n')}</Text></Section>
+        <Section title="If You Miss Gym">
+          <Text style={s.note}>💪 Full backup workout:</Text>
+          {workouts[selectedWorkout].backup.map((item, idx) => (
+            <Text key={idx} style={[s.note, {marginLeft: 8, marginTop: 4}]}>• {item}</Text>
+          ))}
+        </Section>
       </>}
 
       {tab==='Cardio' && <>
@@ -502,10 +580,46 @@ export default function App(){
 
       {tab==='Profile' && <>
         <Section title="Your Settings">
+          <Input label="Profile Name" value={String(profile.name)} onChange={v=>setProfile(p=>({...p,name:v}))}/>
           <Input label="Age" value={String(profile.age)} onChange={v=>setProfile(p=>({...p,age:num(v)}))}/><Input label="Height inches" value={String(profile.heightIn)} onChange={v=>setProfile(p=>({...p,heightIn:num(v)}))}/><Input label="Current weight" value={String(profile.weight)} onChange={v=>setProfile(p=>({...p,weight:num(v)}))}/><Input label="Goal weight" value={String(profile.goalWeight)} onChange={v=>setProfile(p=>({...p,goalWeight:num(v)}))}/><Input label="Gym days/week" value={String(profile.gymDaysPerWeek ?? 4)} onChange={v=>setProfile(p=>({...p,gymDaysPerWeek:num(v)}))}/><Input label="Daily calorie goal" value={String(profile.calorieGoal)} onChange={v=>setProfile(p=>({...p,calorieGoal:num(v)}))}/><Input label="Protein goal" value={String(profile.proteinGoal)} onChange={v=>setProfile(p=>({...p,proteinGoal:num(v)}))}/>
           <Text style={s.label}>Weight loss rate</Text>
           <View style={s.row}>{Object.values(weeklyLossOptions).map(option=><Pill key={option.rate} active={(profile.weeklyLossRate ?? 1)===option.rate} onPress={()=>{const targets=calculateNutritionTargets({...profile,weeklyLossRate:option.rate,goal:'cut'});setProfile(p=>({...p,goal:'cut',weeklyLossRate:option.rate,aggression:targets.deficit,calorieGoal:targets.calorieGoal,proteinGoal:targets.proteinGoal}))}}>{option.label}</Pill>)}</View>
-          <Text style={s.note}>Maintenance estimate: {calculateNutritionTargets(profile).maintenance}. Current target before missed-lift adjustment: {profile.calorieGoal}. You can override it above.</Text><Pill onPress={()=>Alert.alert('Saved locally','This app stores data on this phone using AsyncStorage.')}>Storage info</Pill>
+          <Text style={s.note}>Maintenance estimate: {calculateNutritionTargets(profile).maintenance}. Current target before missed-lift adjustment: {profile.calorieGoal}. You can override it above.</Text>
+        </Section>
+
+        <Section title="🍽️ Meal Preferences">
+          {profile.mealPreferences ? (
+            <View>
+              <Text style={s.note}><Text style={{fontWeight:'700'}}>Cooking time:</Text> {profile.mealPreferences.cookingTimePerMeal || 'Moderate'}</Text>
+              <Text style={s.note}><Text style={{fontWeight:'700'}}>Proteins:</Text> {profile.mealPreferences.favoriteProteins?.length ? profile.mealPreferences.favoriteProteins.join(', ') : 'Not specified'}</Text>
+              <Text style={s.note}><Text style={{fontWeight:'700'}}>Carbs:</Text> {profile.mealPreferences.favoriteCarbs?.length ? profile.mealPreferences.favoriteCarbs.join(', ') : 'Not specified'}</Text>
+              <Text style={s.note}><Text style={{fontWeight:'700'}}>Veggies:</Text> {profile.mealPreferences.favoriteVeggies?.length ? profile.mealPreferences.favoriteVeggies.join(', ') : 'Not specified'}</Text>
+              <Text style={s.note}><Text style={{fontWeight:'700'}}>Allergies:</Text> {profile.mealPreferences.allergies || 'None'}</Text>
+            </View>
+          ) : (
+            <Text style={s.note}>No meal preferences saved. These are used by AI for meal recommendations.</Text>
+          )}
+        </Section>
+
+        <Section title="🏋️ Workout Preferences">
+          {profile.workoutPreferences ? (
+            <View>
+              <Text style={s.note}><Text style={{fontWeight:'700'}}>Using:</Text> {profile.workoutPreferences.useDefaults ? 'Default workouts' : 'Custom preferences'}</Text>
+              {!profile.workoutPreferences.useDefaults && (
+                <>
+                  <Text style={s.note}><Text style={{fontWeight:'700'}}>Time per workout:</Text> {profile.workoutPreferences.timePerWorkout || 'Not specified'}</Text>
+                  <Text style={s.note}><Text style={{fontWeight:'700'}}>Equipment:</Text> {profile.workoutPreferences.equipmentAccess || 'Not specified'}</Text>
+                  <Text style={s.note}><Text style={{fontWeight:'700'}}>Liked exercises:</Text> {profile.workoutPreferences.likedExercises || 'Not specified'}</Text>
+                </>
+              )}
+            </View>
+          ) : (
+            <Text style={s.note}>No workout preferences saved. These are used for AI workout customization.</Text>
+          )}
+        </Section>
+
+        <Section title="Data & Reset">
+          <Pill onPress={()=>Alert.alert('Saved locally','This app stores data on this phone using AsyncStorage.')}>Storage info</Pill>
           <View style={{marginTop:10}}><Pill onPress={()=>Alert.alert('Reset app data','This clears local CalorieCounter data and shows onboarding again.',[{text:'Cancel',style:'cancel'},{text:'Reset',style:'destructive',onPress:resetLocalData}])}>Reset intake / local data</Pill></View>
         </Section>
       </>}
@@ -546,6 +660,29 @@ export default function App(){
       onChange={setManualMeal}
       onClose={() => setShowManualMeal(false)}
       onSave={handleSaveManualMeal}
+    />
+    {editingMeal && (
+      <MealEditModal
+        visible={showMealEdit}
+        meal={editingMeal}
+        onClose={() => setShowMealEdit(false)}
+        onSave={handleSaveEditedMeal}
+        onDelete={handleDeleteMeal}
+      />
+    )}
+    <ImportExportModal
+      visible={showImportExportMeals}
+      type="meal"
+      items={mealsState}
+      onClose={() => setShowImportExportMeals(false)}
+      onImport={handleImportMeals}
+    />
+    <ImportExportModal
+      visible={showImportExportWorkouts}
+      type="workout"
+      items={workouts}
+      onClose={() => setShowImportExportWorkouts(false)}
+      onImport={handleImportWorkouts}
     />
   </SafeAreaView>
 }
