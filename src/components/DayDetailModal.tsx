@@ -8,8 +8,8 @@ import {
   ScrollView,
   Pressable,
   TextInput,
-  SafeAreaView,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { getDayStatus, ColorMap } from '../utils/colorScheme';
 import { getDateString, getDayOfWeekShort } from '../utils/dateHelpers';

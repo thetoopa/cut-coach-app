@@ -1,19 +1,34 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { SafeAreaView, ScrollView, View, Text, TextInput, Pressable, StyleSheet, Alert, Modal, KeyboardAvoidingView, Platform, Vibration } from 'react-native';
+import { ScrollView, View, Text, TextInput, Pressable, StyleSheet, Alert, Modal, KeyboardAvoidingView, Platform, Vibration } from 'react-native';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StatusBar } from 'expo-status-bar';
 import { MaterialIcons } from '@expo/vector-icons';
 import { CalendarView } from './src/components/CalendarView';
 import { DayDetailModal } from './src/components/DayDetailModal';
 import { AICoachModal } from './src/components/AICoachModal';
-import { EnhancedOnboardingFlow } from './src/components/EnhancedOnboardingFlow';
+import { IntakeFlow } from './src/components/intake/IntakeFlow';
 import { MealEditModal } from './src/components/MealEditModal';
 import { ImportExportModal } from './src/components/ImportExportModal';
 import { SplashScreen } from './src/components/SplashScreen';
 import { BottomTabBar, MainTab } from './src/components/BottomTabBar';
 import { MoreMenu, MoreTab } from './src/components/MoreMenu';
+import { HomeScreen } from './src/components/home/HomeScreen';
+import { CuratedMealLibrary } from './src/components/meals/CuratedMealLibrary';
+import { CommunityMealLibrary } from './src/components/meals/CommunityMealLibrary';
+import { CuratedMeal, curatedMealToAppMeal, curatedMeals } from './src/data/curatedMeals';
+import { AuthScreen } from './src/components/auth/AuthScreen';
+import { ProfileCompletionScreen } from './src/components/auth/ProfileCompletionScreen';
+import { EditProfileScreen } from './src/components/profile/EditProfileScreen';
+import { ProfileAvatar } from './src/components/profile/ProfileAvatar';
+import { UserSearchScreen } from './src/components/social/UserSearchScreen';
 import { calculateCardioPlan, calculateWaterPlan, WeeklyLossRate, calculateEffectiveCalorieGoal, calculateNutritionTargets, getProgressionRecommendation, suggestedRestSeconds, weeklyLossOptions } from './src/utils/calculations';
 import { parseMealJSON, parseWorkoutJSON } from './src/utils/exportImport';
+import { getCurrentSession, onAuthStateChange, signOut } from './src/services/authService';
+import { getCurrentProfile } from './src/services/profileService';
+import { uploadMealToCommunity } from './src/services/communityMealService';
+import { isSupabaseConfigured } from './src/services/supabaseClient';
+import { UserProfile } from './src/types/social';
 type Tab = 'Today' | 'Calendar' | 'Meals' | 'Workout' | 'Cardio' | 'Water' | 'Grocery' | 'Weight' | 'Profile';
 type Meal = { id: string; name: string; type: 'Breakfast'|'Lunch'|'Dinner'|'Snack'; calories: number; protein: number; carbs: number; fat: number; notes: string; custom?: boolean };
 type Exercise = { id: string; name: string; sets: number; minReps: number; maxReps: number; weight: number; lastReps: number[]; lastWeights?: number[]; backup?: string };
@@ -61,6 +76,12 @@ type Profile = {
   gymDaysPerWeek?: number;
   mealPreferences?: MealPreferences;
   workoutPreferences?: WorkoutPreferences;
+  programTemplate?: any;
+  nutritionPlan?: any;
+  cardioPlan?: any;
+  activityPresets?: any[];
+  mealPortfolio?: any[];
+  selectedCuratedMealIds?: string[];
 };
 type DayLog = { date: string; weight?: number; calories: number; protein: number; outdoorWalk: number; inclineWalk: number; cardioBurnedCalories?: number; golfBurnedCalories?: number; otherBurnedCalories?: number; workoutBurnedCalories?: number; alcoholCalories?: number; golf: boolean; golfHoles?: number; golfMode?: 'riding'|'walking'; waterOz?: number; plannedLift?: boolean; drinking: boolean; drinks: number; workoutDone: boolean; selectedMeals: string[]; notes: string; workoutName?: string; workoutEntries?: WorkoutExerciseLog[] };
 type GroceryItem = { id: string; name: string; source: string; store: string; needed: boolean; bought: boolean };
@@ -168,6 +189,12 @@ const mealSlotRatios: Record<Meal['type'], { calories: number; protein: number; 
   Dinner: { calories: 0.32, protein: 0.34, carbs: 0.30, fat: 0.34 },
   Snack: { calories: 0.13, protein: 0.14, carbs: 0.12, fat: 0.14 },
 };
+
+function mealsFromCuratedIds(ids?: string[]): Meal[] {
+  if (!ids?.length) return [];
+  const selected = curatedMeals.filter(meal => ids.includes(meal.id));
+  return selected.map(meal => curatedMealToAppMeal(meal) as Meal);
+}
 
 function mealMacroTarget(profile: Profile, type: Meal['type']) {
   const targets = calculateNutritionTargets(profile);
@@ -429,6 +456,21 @@ function MacroBar({calories, calorieGoal, protein, proteinGoal, carbs, carbGoal,
   );
 }
 
+function WorkoutTimerBar({seconds, restActive, low, detail, onSkipRest}:{seconds:number; restActive:boolean; low:boolean; detail:string; onSkipRest:()=>void}) {
+  return (
+    <View style={[{position:'absolute',left:14,right:14,bottom:104,minHeight:74,backgroundColor:'rgba(15,23,42,0.86)',borderWidth:1,borderColor:'rgba(52,211,153,0.45)',borderRadius:14,flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingHorizontal:14,paddingVertical:10,zIndex:21,elevation:9}, low && {borderColor:'rgba(239,68,68,0.72)'}]}>
+      <View>
+        <Text style={{color:'#34d399',fontSize:12,fontWeight:'900',textTransform:'uppercase'}}>{restActive ? 'Rest timer' : 'Workout timer'}</Text>
+        <Text style={{color:'#cbd5e1',fontSize:13,fontWeight:'700',maxWidth:210,marginTop:3}} numberOfLines={1}>{detail}</Text>
+      </View>
+      <Pressable onPress={onSkipRest} style={{alignItems:'center',justifyContent:'center'}}>
+        <Text style={[{color:'#f8fafc',fontSize:30,fontWeight:'900'}, low && {color:'#ef4444'}]}>{formatSeconds(seconds)}</Text>
+        <Text style={{color:'#94a3b8',fontSize:11,fontWeight:'900'}}>{restActive ? 'Skip' : 'Running'}</Text>
+      </Pressable>
+    </View>
+  );
+}
+
 function workoutLogFromWorkout(workout?: WorkoutDay) {
   if (!workout) return { workoutName: undefined, workoutEntries: [] as WorkoutExerciseLog[] };
   return {
@@ -446,11 +488,15 @@ function workoutLogFromWorkout(workout?: WorkoutDay) {
   };
 }
 
-export default function App(){
+function AppInner(){
   const [tab,setTab]=useState<Tab>('Today');
   const [profile,setProfile]=useState<Profile>(defaultProfile);
   const [hasSeenOnboarding, setHasSeenOnboarding] = useState(false);
   const [isLoadingProfile, setIsLoadingProfile] = useState(true);
+  const [isLoadingCloud, setIsLoadingCloud] = useState(true);
+  const [cloudSession, setCloudSession] = useState<any | null>(null);
+  const [cloudProfile, setCloudProfile] = useState<UserProfile | null>(null);
+  const [cloudLocalOnly, setCloudLocalOnly] = useState(!isSupabaseConfigured);
   const [showSplash, setShowSplash] = useState(true);
   const [mealsState, setMealsState] = useState<Meal[]>(meals);
   const [log,setLog]=useState<DayLog>({date:todayKey(), calories:0, protein:0, outdoorWalk:0, inclineWalk:0, golf:false, golfHoles:18, golfMode:'riding', waterOz:0, drinking:false, drinks:0, workoutDone:false, selectedMeals:[], notes:''});
@@ -463,7 +509,12 @@ export default function App(){
   const [showAICoach, setShowAICoach] = useState(false);
   const [showAIWorkout, setShowAIWorkout] = useState(false);
   const [showManualMeal, setShowManualMeal] = useState(false);
+  const [showMealLibrary, setShowMealLibrary] = useState(false);
+  const [showCommunityMeals, setShowCommunityMeals] = useState(false);
+  const [showEditCloudProfile, setShowEditCloudProfile] = useState(false);
+  const [showUserSearch, setShowUserSearch] = useState(false);
   const [manualMeal, setManualMeal] = useState<Meal>(blankMeal());
+  const [manualMealPrivate, setManualMealPrivate] = useState(false);
   const [editingMeal, setEditingMeal] = useState<Meal | null>(null);
   const [showMealEdit, setShowMealEdit] = useState(false);
   const [showImportExportMeals, setShowImportExportMeals] = useState(false);
@@ -473,6 +524,8 @@ export default function App(){
   const [workoutRunning, setWorkoutRunning] = useState(false);
   const [workoutSeconds, setWorkoutSeconds] = useState(0);
   const [restSeconds, setRestSeconds] = useState(0);
+  const [activeExerciseIndex, setActiveExerciseIndex] = useState(0);
+  const [activeSetIndex, setActiveSetIndex] = useState(0);
   const [groceryItems, setGroceryItems] = useState<GroceryItem[]>([]);
   const [selectedStores, setSelectedStores] = useState<string[]>(['Costco', 'Trader Joe’s']);
   const [weightRange, setWeightRange] = useState<WeightRange>('Month');
@@ -515,6 +568,62 @@ export default function App(){
   }
   function progressionText(e:Exercise){ return getProgressionRecommendation(e).text; }
   function startRestTimer(seconds:number){ setRestSeconds(seconds); Vibration.vibrate(30); }
+  function startWorkoutFlow(){
+    setWorkoutRunning(true);
+    setActiveExerciseIndex(0);
+    setActiveSetIndex(0);
+    setRestSeconds(0);
+    Vibration.vibrate(40);
+  }
+  function saveWorkoutSet(wi:number, ei:number, si:number, rawValue:string, fallbackWeight:number, fallbackReps:number, startRest = true){
+    const exercise = workouts[wi]?.exercises[ei];
+    if (!exercise) return;
+    const match = String(rawValue || '').match(/(\d+(?:\.\d+)?)\s*(?:x|,|\s)\s*(\d+)/i);
+    const weight = match ? Number(match[1]) : fallbackWeight;
+    const reps = match ? Number(match[2]) : fallbackReps;
+    const repsList = [...exercise.lastReps];
+    const weightsList = [...(exercise.lastWeights ?? Array.from({length: exercise.sets}).map(() => exercise.weight))];
+    repsList[si] = reps;
+    weightsList[si] = weight;
+    updateExercise(wi, ei, { lastReps: repsList, lastWeights: weightsList });
+    setWorkoutRunning(true);
+    const nextSet = si + 1;
+    if (nextSet < exercise.sets) {
+      setActiveExerciseIndex(ei);
+      setActiveSetIndex(nextSet);
+    } else {
+      setActiveExerciseIndex(Math.min(ei + 1, workouts[wi].exercises.length - 1));
+      setActiveSetIndex(0);
+    }
+    if (startRest) startRestTimer(suggestedRestSeconds(exercise));
+  }
+  function logWorkoutSet(wi:number, ei:number, si:number){
+    const exercise = workouts[wi]?.exercises[ei];
+    if (!exercise) return;
+    const currentWeight = exercise.lastWeights?.[si] ?? exercise.weight ?? 0;
+    const currentReps = exercise.lastReps?.[si] || exercise.maxReps || 0;
+    const defaultValue = `${currentWeight}x${currentReps || exercise.minReps || 8}`;
+    const prompt = (Alert as any).prompt;
+    if (typeof prompt !== 'function') {
+      saveWorkoutSet(wi, ei, si, defaultValue, currentWeight, currentReps || exercise.minReps || 8);
+      return;
+    }
+    setWorkoutRunning(true);
+    startRestTimer(suggestedRestSeconds(exercise));
+    prompt(
+      `Log ${exercise.name} set ${si + 1}`,
+      'Enter weight and reps as weight x reps, like 135x8.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Save',
+          onPress: (value?: string) => saveWorkoutSet(wi, ei, si, value || defaultValue, currentWeight, currentReps || exercise.minReps || 8, false),
+        },
+      ],
+      'plain-text',
+      defaultValue
+    );
+  }
   function applyProgression(wi:number, ei:number){ const rec=getProgressionRecommendation(workouts[wi].exercises[ei]); if(rec.action==='increase') updateExercise(wi,ei,{weight:rec.nextWeight,lastReps:Array.from({length:workouts[wi].exercises[ei].sets}).map(()=>0),lastWeights:Array.from({length:workouts[wi].exercises[ei].sets}).map(()=>rec.nextWeight)}); }
   function addExerciseToWorkout(wi:number){
     setWorkouts(ws=>ws.map((w,i)=>i!==wi?w:{...w,exercises:[...w.exercises,{id:`custom-${Date.now()}`,name:'New Exercise',sets:3,minReps:8,maxReps:12,weight:0,lastReps:[0,0,0],lastWeights:[0,0,0],backup:'Choose a similar movement you can do safely.'}]}));
@@ -544,8 +653,15 @@ export default function App(){
         setMealsState(v.meals ?? meals);
         setGroceryItems(v.groceryItems ?? []);
         setSelectedStores(v.selectedStores ?? ['Costco', 'Trader Joe’s']);
-        // Check if profile has required fields from onboarding
-        setHasSeenOnboarding(!!(loadedProfile.name && loadedProfile.weight && loadedProfile.calorieGoal));
+        // Require the new Calos intake system to be completed before the app can bypass onboarding.
+        setHasSeenOnboarding(!!(
+          loadedProfile.name &&
+          loadedProfile.weight &&
+          loadedProfile.calorieGoal &&
+          loadedProfile.programTemplate?.workouts?.length &&
+          loadedProfile.nutritionPlan &&
+          loadedProfile.cardioPlan
+        ));
       } else {
         // First time - no saved data
         setHasSeenOnboarding(false);
@@ -553,6 +669,35 @@ export default function App(){
       setIsLoadingProfile(false);
     })();
   }, []);
+
+  useEffect(() => {
+    if (cloudLocalOnly || !isSupabaseConfigured) {
+      setIsLoadingCloud(false);
+      return;
+    }
+    let mounted = true;
+    const loadCloud = async () => {
+      try {
+        const session = await getCurrentSession();
+        if (!mounted) return;
+        setCloudSession(session);
+        setCloudProfile(session ? await getCurrentProfile() : null);
+      } catch (error: any) {
+        Alert.alert('Cloud unavailable', error?.message ?? 'Calos will keep working locally.');
+      } finally {
+        if (mounted) setIsLoadingCloud(false);
+      }
+    };
+    loadCloud();
+    const subscription = onAuthStateChange(async (session) => {
+      setCloudSession(session);
+      setCloudProfile(session ? await getCurrentProfile().catch(() => null) : null);
+    });
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, [cloudLocalOnly]);
 
   // Auto-save whenever profile changes
   useEffect(() => {
@@ -598,8 +743,11 @@ export default function App(){
       carbGoal: completedProfile.carbGoal ?? completedTargets.carbGoal,
       fatGoal: completedProfile.fatGoal ?? completedTargets.fatGoal,
     };
-    const generatedMeals = generateMealsFromPreferences(profileWithMacroTargets);
-    const generatedWorkouts = generateWorkoutsFromPreferences(profileWithMacroTargets);
+    const curatedSelectedMeals = mealsFromCuratedIds(profileWithMacroTargets.selectedCuratedMealIds);
+    const generatedMeals = curatedSelectedMeals.length ? curatedSelectedMeals : generateMealsFromPreferences(profileWithMacroTargets);
+    const generatedWorkouts = (profileWithMacroTargets.programTemplate?.workouts?.length
+      ? profileWithMacroTargets.programTemplate.workouts
+      : generateWorkoutsFromPreferences(profileWithMacroTargets)) as WorkoutDay[];
     setProfile(profileWithMacroTargets);
     setMealsState(generatedMeals);
     setWorkouts(generatedWorkouts);
@@ -666,6 +814,17 @@ export default function App(){
     setLog(current => ({...current, selectedMeals: [...current.selectedMeals, ...customMeals.map(meal => meal.id)]}));
   };
 
+  const handleAddCuratedMeal = (curatedMeal: CuratedMeal) => {
+    const appMeal = curatedMealToAppMeal(curatedMeal) as Meal;
+    setMealsState(current => current.some(meal => meal.id === appMeal.id) ? current : [...current, appMeal]);
+    setLog(current => current.selectedMeals.includes(appMeal.id) ? current : {...current, selectedMeals: [...current.selectedMeals, appMeal.id]});
+  };
+
+  const handleAddCommunityMeal = (meal: Meal) => {
+    setMealsState(current => current.some(item => item.id === meal.id) ? current : [...current, meal]);
+    setLog(current => current.selectedMeals.includes(meal.id) ? current : {...current, selectedMeals: [...current.selectedMeals, meal.id]});
+  };
+
   const handleSaveAIWorkout = (generatedWorkouts: WorkoutDay[]) => {
     setWorkouts(generatedWorkouts);
     setSelectedWorkout(0);
@@ -675,7 +834,7 @@ export default function App(){
     setLog(current => ({...current, plannedLift: true}));
   };
 
-  const handleSaveManualMeal = () => {
+  const handleSaveManualMeal = async () => {
     if (!manualMeal.name.trim()) {
       Alert.alert('Meal name required', 'Add a meal name before saving.');
       return;
@@ -690,7 +849,13 @@ export default function App(){
     };
     setMealsState(current => [...current, newMeal]);
     setLog(current => ({...current, selectedMeals: [...current.selectedMeals, newMeal.id]}));
+    if (cloudProfile && isSupabaseConfigured) {
+      uploadMealToCommunity(newMeal, manualMealPrivate, cloudProfile).catch(error => {
+        Alert.alert('Meal saved locally', `Cloud sharing failed: ${error?.message ?? 'try again later.'}`);
+      });
+    }
     setManualMeal(blankMeal());
+    setManualMealPrivate(false);
     setShowManualMeal(false);
   };
 
@@ -796,9 +961,25 @@ export default function App(){
     return <View style={{flex: 1, backgroundColor: '#111827', justifyContent: 'center', alignItems: 'center'}}><Text style={{color: '#cbd5e1', fontSize: 16}}>Loading...</Text></View>;
   }
 
+  if (isLoadingCloud) {
+    return <View style={{flex: 1, backgroundColor: '#111827', justifyContent: 'center', alignItems: 'center'}}><Text style={{color: '#cbd5e1', fontSize: 16}}>Loading Calos cloud...</Text></View>;
+  }
+
+  if (!cloudLocalOnly && !cloudSession) {
+    return <AuthScreen onAuthenticated={async () => {
+      const session = await getCurrentSession();
+      setCloudSession(session);
+      setCloudProfile(session ? await getCurrentProfile().catch(() => null) : null);
+    }} onSkipCloud={() => setCloudLocalOnly(true)} />;
+  }
+
+  if (!cloudLocalOnly && cloudSession && !cloudProfile) {
+    return <ProfileCompletionScreen onComplete={setCloudProfile} />;
+  }
+
   // Show onboarding if user hasn't completed it
   if (!hasSeenOnboarding) {
-    return <EnhancedOnboardingFlow onComplete={handleOnboardingComplete} />;
+    return <IntakeFlow onComplete={handleOnboardingComplete} />;
   }
 
   const secondaryTabs: MoreTab[] = ['Calendar', 'Grocery', 'Weight', 'Profile'];
@@ -834,47 +1015,28 @@ export default function App(){
       },
     }));
   };
+  const activeWorkout = workouts[selectedWorkout] ?? workouts[0] ?? baseWorkouts[0];
+  const activeExercise = activeWorkout?.exercises[activeExerciseIndex];
+  const workoutTimerDetail = activeExercise
+    ? `${activeExercise.name} · next set ${Math.min(activeSetIndex + 1, activeExercise.sets)}`
+    : 'Ready for your next set';
 
   return <SafeAreaView style={s.app}><StatusBar style="light"/><View style={s.header}><Text style={s.title}>Calos</Text><Text style={s.sub}>Track, analyze, thrive</Text></View>
-    <ScrollView contentContainerStyle={{padding:16,paddingBottom:tab === 'Meals' ? 150 : 28}}>
-      {tab==='Today' && <>
-        <Section title="Today Snapshot">
-          <View style={s.grid}><Metric label="Calories left" value={caloriesLeft}/><Metric label="Protein left" value={Math.max(0,proteinLeft)}/><Metric label="Carbs left" value={Math.max(0,carbsLeft)}/><Metric label="Fat left" value={Math.max(0,fatLeft)}/><Metric label="Cardio burned" value={cardioPlan.burnedCalories}/><Metric label="Cardio burn left" value={cardioPlan.remainingCalories}/><Metric label="Lift food credit" value={effectiveCalories.workoutCredit}/><Metric label="Water oz left" value={waterPlan.remainingOunces}/></View>
-          <Text style={s.note}>Target: {calorieGoal} calories / {profile.proteinGoal}g P / {carbGoal}g C / {fatGoal}g F. {liftMessage}</Text>
-        </Section>
-        <Section title="Day Modes">
-          <View style={s.row}><Pill active={log.plannedLift !== false} onPress={()=>setLog(l=>({...l,plannedLift:!(l.plannedLift !== false)}))}>Lift planned</Pill><Pill active={log.golf} onPress={()=>setLog(l=>({...l,golf:!l.golf}))}>Golf day</Pill><Pill active={log.drinking} onPress={()=>setLog(l=>({...l,drinking:!l.drinking,alcoholCalories:!l.drinking ? (l.drinks || 0) * DRINK_CALORIES : l.alcoholCalories}))}>Drinking day</Pill><Pill active={log.workoutDone} onPress={()=>setLog(l=>({...l,workoutDone:!l.workoutDone}))}>Workout done</Pill></View>
-          {log.drinking && <><Input label="Planned drinks" value={String(log.drinks)} onChange={v=>setLog(l=>({...l,drinks:num(v),alcoholCalories:num(v)*DRINK_CALORIES}))}/><Input label="Estimated drink calories" value={String(log.alcoholCalories ?? estimatedAlcoholCalories)} onChange={v=>setLog(l=>({...l,alcoholCalories:v === '' ? undefined : num(v)}))}/><Text style={s.helpText}>Default estimate is {DRINK_CALORIES} calories per drink. Change it if you know the actual cocktail, beer, wine, or seltzer calories.</Text></>} 
-        </Section>
-        <Section title="Morning Weight">
-          <Input label="Morning weight" value={String(log.weight??'')} onChange={v=>setLog(l=>({...l,weight:num(v)}))}/>
-          <Text style={s.helpText}>Weigh before food, water, or training. Use the bathroom first, weigh at the same time daily, and ideally weigh undressed.</Text>
-        </Section>
-        <Section title="Cardio">
-          <Input label="Outdoor walk minutes" value={String(log.outdoorWalk)} onChange={v=>setLog(l=>({...l,outdoorWalk:num(v),cardioBurnedCalories:undefined}))}/>
-          <Input label="Incline treadmill minutes" value={String(log.inclineWalk)} onChange={v=>setLog(l=>({...l,inclineWalk:num(v),cardioBurnedCalories:undefined}))}/>
-          <Input label="Cardio calories burned" value={String(log.cardioBurnedCalories ?? cardioPlan.estimatedCardioCalories)} onChange={v=>setLog(l=>({...l,cardioBurnedCalories:v === '' ? undefined : num(v)}))}/>
-          <Text style={s.helpText}>Estimated cardio burn from walking: {cardioPlan.estimatedCardioCalories} calories. Wearables can overestimate walking and lifting calories, so the app estimate may be safer when numbers look inflated.</Text>
-          <Input label="Other burned calories" value={String(log.otherBurnedCalories ?? 0)} onChange={v=>setLog(l=>({...l,otherBurnedCalories:num(v)}))}/>
-          <Text style={s.helpText}>Use other burned calories for sports, classes, or health-device activity that is not already counted above.</Text>
-          {log.golf && <>
-            <View style={s.row}><Pill active={(log.golfMode ?? 'riding')==='riding'} onPress={()=>setLog(l=>({...l,golfMode:'riding'}))}>Riding</Pill><Pill active={log.golfMode==='walking'} onPress={()=>setLog(l=>({...l,golfMode:'walking'}))}>Walking</Pill></View>
-            <Input label="Golf holes" value={String(log.golfHoles ?? 18)} onChange={v=>setLog(l=>({...l,golfHoles:num(v)}))}/>
-            <Text style={s.note}>Golf estimate: about {cardioPlan.estimatedGolfCalories} calories. Override it below if your watch or cart app gives a better number.</Text>
-            <Input label="Golf calories burned" value={String(log.golfBurnedCalories ?? cardioPlan.estimatedGolfCalories)} onChange={v=>setLog(l=>({...l,golfBurnedCalories:v === '' ? undefined : num(v)}))}/>
-          </>}
-        </Section>
-        <Section title="Workout Calories">
-          <Text style={s.note}>Workout calorie estimate: {effectiveCalories.estimatedWorkoutCalories}. Mark workout done to add the workout credit to your food target.</Text>
-          <Input label="Workout calories burned" value={String(log.workoutBurnedCalories ?? effectiveCalories.estimatedWorkoutCalories)} onChange={v=>setLog(l=>({...l,workoutBurnedCalories:v === '' ? undefined : num(v)}))}/>
-          <Text style={s.helpText}>Fitness watches are often least accurate for lifting because heart rate does not map cleanly to strength work. Use the app estimate when the wearable number seems too generous.</Text>
-        </Section>
-        <Section title="Water">
-          <Input label="Water ounces" value={String(log.waterOz ?? 0)} onChange={v=>setLog(l=>({...l,waterOz:num(v)}))}/>
-          <View style={s.row}><Pill onPress={()=>setLog(l=>({...l,waterOz:(l.waterOz ?? 0)+8}))}>+8 oz</Pill><Pill onPress={()=>setLog(l=>({...l,waterOz:(l.waterOz ?? 0)+16}))}>+16 oz</Pill><Pill onPress={()=>setLog(l=>({...l,waterOz:(l.waterOz ?? 0)+32}))}>+32 oz</Pill><Pill onPress={()=>setLog(l=>({...l,waterOz:(l.waterOz ?? 0)+64}))}>+64 oz</Pill></View>
-          <Text style={s.helpText}>{waterPlan.loggedOunces}/{waterPlan.targetOunces} oz complete. Water gets a calendar droplet when complete, but it does not block green day status.</Text>
-        </Section>
-      </>}
+    <ScrollView contentContainerStyle={{padding:16,paddingBottom:tab === 'Meals' || tab === 'Workout' ? 150 : 28}}>
+      {tab==='Today' && <HomeScreen
+        profile={profile}
+        log={log}
+        dayLogs={dayLogs}
+        workouts={workouts}
+        selectedWorkout={selectedWorkout}
+        caloriesLogged={mealCals + alcoholCals}
+        calorieGoal={calorieGoal}
+        proteinLogged={mealProtein}
+        proteinGoal={profile.proteinGoal}
+        onLogWeight={(weight) => setLog(current => ({...current, weight}))}
+        onStartWorkout={() => { setTab('Workout'); startWorkoutFlow(); }}
+        onLogFood={() => setTab('Meals')}
+      />}
 
       {tab==='Calendar' && <Section title="Calendar & Logging"><CalendarView dayLogs={dayLogs} profile={profile} currentLog={log} allMeals={mealsState} onDayPress={handleDayPress} /></Section>}
 
@@ -883,6 +1045,10 @@ export default function App(){
           <View style={{flexDirection: 'row', gap: 8, marginBottom: 12}}>
             <Pressable style={{flex: 1}} onPress={() => setShowAICoach(true)}><View style={s.aiButton}><MaterialIcons name="smart-toy" size={16} color="#fff" /><Text style={s.aiButtonText}>Ask AI Coach</Text></View></Pressable>
             <Pressable style={{flex: 1}} onPress={() => setShowManualMeal(true)}><View style={s.manualButton}><MaterialIcons name="add-circle-outline" size={16} color="#cbd5e1" /><Text style={s.manualButtonText}>Add Meal</Text></View></Pressable>
+          </View>
+          <View style={{flexDirection: 'row', gap: 8, marginBottom: 12}}>
+            <Pressable style={{flex: 1}} onPress={() => setShowMealLibrary(true)}><View style={s.manualButton}><MaterialIcons name="restaurant-menu" size={16} color="#cbd5e1" /><Text style={s.manualButtonText}>Browse Meal Library</Text></View></Pressable>
+            <Pressable style={{flex: 1}} onPress={() => setShowCommunityMeals(true)}><View style={s.manualButton}><MaterialIcons name="groups" size={16} color="#cbd5e1" /><Text style={s.manualButtonText}>Community Meals</Text></View></Pressable>
           </View>
           <View style={{flexDirection: 'row', gap: 8, marginBottom: 12}}>
             <Pressable style={{flex: 1}} onPress={() => setShowImportExportMeals(true)}><View style={s.manualButton}><MaterialIcons name="import-export" size={16} color="#cbd5e1" /><Text style={s.manualButtonText}>Import/Export</Text></View></Pressable>
@@ -894,34 +1060,34 @@ export default function App(){
 
       {tab==='Workout' && <>
         <Section title="Workout Guide">
-          <Text style={s.note}>Start the workout timer when lifting begins. Log weight and reps for each set. Hit the suggested rest timer after hard sets. When every set reaches the top of the rep range, use Apply next to raise weight next session.</Text>
+          <Text style={s.note}>Start the session, then tap each set as you complete it. Calos asks for weight and reps, starts the right rest timer, and moves you to the next set.</Text>
           <View style={{flexDirection: 'row', gap: 8, marginTop: 10}}>
             <Pressable style={{flex: 1}} onPress={() => setShowAIWorkout(true)}><View style={s.manualButton}><MaterialIcons name="fitness-center" size={16} color="#cbd5e1" /><Text style={s.manualButtonText}>AI Workout Review</Text></View></Pressable>
             <Pressable style={{flex: 1}} onPress={() => setShowImportExportWorkouts(true)}><View style={s.manualButton}><MaterialIcons name="import-export" size={16} color="#cbd5e1" /><Text style={s.manualButtonText}>Import/Export</Text></View></Pressable>
           </View>
         </Section>
         <Section title="Pick Workout"><View style={s.row}>{workouts.map((w,i)=><Pill key={w.id} active={i===selectedWorkout} onPress={()=>setSelectedWorkout(i)}>{w.name.split(' ')[0]}</Pill>)}</View></Section>
-        <Section title={workouts[selectedWorkout].name}>
+        <Section title={activeWorkout.name}>
           <View style={s.timerPanel}>
-            <View style={s.restHero}>
-              <Text style={s.restHeroLabel}>{restSeconds > 0 ? 'REST TIMER' : workoutRunning ? 'READY FOR NEXT SET' : 'START SESSION'}</Text>
-              <Text style={s.restHeroValue}>{formatSeconds(restSeconds > 0 ? restSeconds : workoutSeconds)}</Text>
+            <Pressable onPress={workoutRunning ? () => setWorkoutRunning(false) : startWorkoutFlow} style={[s.restHero, restSeconds > 0 && restSeconds <= 15 && {borderColor:'#ef4444',backgroundColor:'#1f0b0b'}]}>
+              <Text style={s.restHeroLabel}>{restSeconds > 0 ? 'REST TIMER' : workoutRunning ? 'WORKOUT TIMER' : 'START SESSION'}</Text>
+              <Text style={[s.restHeroValue, restSeconds > 0 && restSeconds <= 15 && {color:'#ef4444'}]}>{formatSeconds(restSeconds > 0 ? restSeconds : workoutSeconds)}</Text>
               <Text style={s.cardioLabel}>{restSeconds > 0 ? 'recover, breathe, then hit the next set' : workoutRunning ? `workout running · total ${formatSeconds(workoutSeconds)}` : 'tap Start to begin the workout flow'}</Text>
-            </View>
-            <View style={s.row}><Pill active={workoutRunning} onPress={()=>setWorkoutRunning(r=>!r)}>{workoutRunning ? 'Pause' : 'Start'}</Pill><Pill onPress={()=>{setWorkoutRunning(false);setWorkoutSeconds(0);setRestSeconds(0);}}>Reset</Pill><Pill active={log.workoutDone} onPress={()=>setLog(l=>({...l,workoutDone:!l.workoutDone,plannedLift:true,...workoutLogFromWorkout(workouts[selectedWorkout])}))}>Mark done</Pill></View>
-            <Text style={s.note}>Each exercise has its own suggested rest. Tap Start rest after a hard set and this timer takes over the screen.</Text>
+            </Pressable>
+            <View style={s.row}><Pill active={workoutRunning} onPress={workoutRunning ? ()=>setWorkoutRunning(false) : startWorkoutFlow}>{workoutRunning ? 'Pause' : 'Start Workout'}</Pill><Pill onPress={()=>{setWorkoutRunning(false);setWorkoutSeconds(0);setRestSeconds(0);setActiveExerciseIndex(0);setActiveSetIndex(0);}}>Reset</Pill><Pill active={log.workoutDone} onPress={()=>setLog(l=>({...l,workoutDone:!l.workoutDone,plannedLift:true,...workoutLogFromWorkout(activeWorkout)}))}>Mark done</Pill></View>
+            <Text style={s.note}>The rest timer starts automatically after you log a set. It stays pinned above the tabs so you can scroll without losing it.</Text>
             <Text style={s.note}>Workout calorie estimate: {effectiveCalories.estimatedWorkoutCalories}. Food target credit when marked done: {effectiveCalories.workoutCredit}.</Text>
             <Input label="Workout calories burned" value={String(log.workoutBurnedCalories ?? effectiveCalories.estimatedWorkoutCalories)} onChange={v=>setLog(l=>({...l,workoutBurnedCalories:v === '' ? undefined : num(v)}))}/>
           </View>
           <Pressable onPress={()=>addExerciseToWorkout(selectedWorkout)} style={s.addExerciseButton}><MaterialIcons name="add" size={17} color="#052e1c" /><Text style={s.addExerciseText}>Add exercise</Text></Pressable>
-          {workouts[selectedWorkout].exercises.map((e,ei)=>{ const restTime = suggestedRestSeconds(e); return <View key={e.id} style={s.exercise}><Input label="Exercise name" value={e.name} onChange={v=>updateExercise(selectedWorkout,ei,{name:v})}/><Text style={s.mealSub}>{e.sets} sets · {e.minReps}-{e.maxReps} reps · next target {e.weight} lb</Text><Text style={s.restHint}>Rest between sets: {formatSeconds(restTime)}</Text><View style={s.formGrid}><View style={s.formHalf}><Input label="Sets" value={String(e.sets)} onChange={v=>{const sets=Math.max(1,num(v,1)); updateExercise(selectedWorkout,ei,{sets,lastReps:Array.from({length:sets}).map((_,idx)=>e.lastReps[idx]??0),lastWeights:Array.from({length:sets}).map((_,idx)=>e.lastWeights?.[idx]??e.weight)})}}/></View><View style={s.formHalf}><Input label="Target lb" value={String(e.weight)} onChange={v=>updateExercise(selectedWorkout,ei,{weight:num(v),lastWeights:e.lastWeights?.length ? e.lastWeights : Array.from({length:e.sets}).map(()=>num(v))})}/></View></View>
-            <View style={s.setRow}>{Array.from({length:e.sets}).map((_,si)=><View key={si} style={s.setBox}><Text style={s.setLabel}>Set {si+1}</Text><View style={s.setInputs}><TextInput style={s.repBox} placeholder="lb" placeholderTextColor="#64748b" keyboardType="numeric" value={(e.lastWeights?.[si] ?? e.weight) ? String(e.lastWeights?.[si] ?? e.weight) : ''} onChangeText={v=>{ const weights=[...(e.lastWeights ?? Array.from({length:e.sets}).map(()=>e.weight))]; weights[si]=num(v); updateExercise(selectedWorkout,ei,{lastWeights:weights}); }}/><TextInput style={s.repBox} placeholder="reps" placeholderTextColor="#64748b" keyboardType="numeric" value={e.lastReps[si]?String(e.lastReps[si]):''} onChangeText={v=>{ const reps=[...e.lastReps]; reps[si]=num(v); updateExercise(selectedWorkout,ei,{lastReps:reps}); }}/></View></View>)}</View>
-            <View style={s.workoutActionRow}><Pill active={restSeconds > 0} onPress={()=>startRestTimer(restTime)}>Start {formatSeconds(restTime)} rest</Pill><Pill onPress={()=>applyProgression(selectedWorkout,ei)}>Apply next</Pill><Pill onPress={()=>removeExerciseFromWorkout(selectedWorkout,ei)}>Remove</Pill></View>
+          {activeWorkout.exercises.map((e,ei)=>{ const restTime = suggestedRestSeconds(e); return <View key={e.id} style={[s.exercise, ei===activeExerciseIndex && {borderColor:'#34d399',backgroundColor:'#0d1f19'}]}><Input label="Exercise name" value={e.name} onChange={v=>updateExercise(selectedWorkout,ei,{name:v})}/><Text style={s.mealSub}>{e.sets} sets · {e.minReps}-{e.maxReps} reps · target {e.weight} lb</Text><Text style={s.restHint}>Suggested rest: {formatSeconds(restTime)}</Text><View style={s.formGrid}><View style={s.formHalf}><Input label="Sets" value={String(e.sets)} onChange={v=>{const sets=Math.max(1,num(v,1)); updateExercise(selectedWorkout,ei,{sets,lastReps:Array.from({length:sets}).map((_,idx)=>e.lastReps[idx]??0),lastWeights:Array.from({length:sets}).map((_,idx)=>e.lastWeights?.[idx]??e.weight)})}}/></View><View style={s.formHalf}><Input label="Target lb" value={String(e.weight)} onChange={v=>updateExercise(selectedWorkout,ei,{weight:num(v),lastWeights:e.lastWeights?.length ? e.lastWeights : Array.from({length:e.sets}).map(()=>num(v))})}/></View></View>
+            <View style={s.setRow}>{Array.from({length:e.sets}).map((_,si)=>{ const loggedReps = e.lastReps[si] || 0; const loggedWeight = e.lastWeights?.[si] ?? e.weight ?? 0; const completed = loggedReps > 0; const active = ei===activeExerciseIndex && si===activeSetIndex; return <Pressable key={si} onPress={()=>logWorkoutSet(selectedWorkout,ei,si)} style={[{width:'47%',minHeight:72,backgroundColor:'#111827',borderWidth:1,borderColor:'#334155',borderRadius:12,padding:10,justifyContent:'center'}, completed && {borderColor:'#34d399',backgroundColor:'#082016'}, active && {borderColor:'#f8fafc'}]}><Text style={[{color:'#94a3b8',fontSize:12,fontWeight:'900',marginBottom:5}, active && {color:'#f8fafc'}]}>Set {si+1}</Text><Text style={{color:'#fff',fontSize:15,fontWeight:'900'}}>{completed ? `${loggedWeight} x ${loggedReps}` : `${loggedWeight || e.weight || '-'} lb · ${e.minReps}-${e.maxReps}`}</Text></Pressable>})}</View>
+            <View style={s.workoutActionRow}><Pill active={ei===activeExerciseIndex} onPress={()=>{setActiveExerciseIndex(ei);setActiveSetIndex(0);}}>Focus</Pill><Pill onPress={()=>startRestTimer(restTime)}>Start {formatSeconds(restTime)} rest</Pill><Pill onPress={()=>removeExerciseFromWorkout(selectedWorkout,ei)}>Remove</Pill></View>
             <Text style={s.note}>{progressionText(e)} Backup: {e.backup}</Text></View>})}
         </Section>
         <Section title="If You Miss Gym">
           <Text style={s.note}>💪 Full backup workout:</Text>
-          {workouts[selectedWorkout].backup.map((item, idx) => (
+          {activeWorkout.backup.map((item, idx) => (
             <Text key={idx} style={[s.note, {marginLeft: 8, marginTop: 4}]}>• {item}</Text>
           ))}
         </Section>
@@ -996,6 +1162,31 @@ export default function App(){
       </>}
 
       {tab==='Profile' && <>
+        <Section title="Cloud Profile">
+          {cloudProfile ? (
+            <View style={{gap:10}}>
+              <View style={{flexDirection:'row',alignItems:'center',gap:12}}>
+                <ProfileAvatar avatarUrl={cloudProfile.avatarUrl} displayName={cloudProfile.displayName} />
+                <View style={{flex:1}}>
+                  <Text style={s.mealTitle}>{cloudProfile.displayName}</Text>
+                  <Text style={s.mealSub}>@{cloudProfile.username}{cloudProfile.isPrivate ? ' · private' : ' · public'}</Text>
+                </View>
+              </View>
+              <View style={{flexDirection:'row',gap:8}}>
+                <Pressable style={{flex:1}} onPress={() => setShowEditCloudProfile(true)}><View style={s.manualButton}><MaterialIcons name="edit" size={16} color="#cbd5e1" /><Text style={s.manualButtonText}>Edit Profile</Text></View></Pressable>
+                <Pressable style={{flex:1}} onPress={() => setShowUserSearch(true)}><View style={s.manualButton}><MaterialIcons name="person-search" size={16} color="#cbd5e1" /><Text style={s.manualButtonText}>Search Users</Text></View></Pressable>
+              </View>
+              <Pressable onPress={() => setShowCommunityMeals(true)}><View style={s.manualButton}><MaterialIcons name="restaurant-menu" size={16} color="#cbd5e1" /><Text style={s.manualButtonText}>Community Meals</Text></View></Pressable>
+              <Pressable onPress={async()=>{try{await signOut();setCloudSession(null);setCloudProfile(null);}catch(error:any){Alert.alert('Logout failed', error?.message ?? 'Please try again.')}}}><View style={s.manualButton}><MaterialIcons name="logout" size={16} color="#cbd5e1" /><Text style={s.manualButtonText}>Log Out</Text></View></Pressable>
+              <Text style={s.helpText}>Public meals can be discovered by other Calos users. Weight, calories, personal logs, and workout logs stay private.</Text>
+            </View>
+          ) : (
+            <View style={{gap:10}}>
+              <Text style={s.note}>{cloudLocalOnly ? 'Cloud is disabled for this session.' : 'No cloud profile found for this account.'}</Text>
+              <Pressable onPress={() => cloudLocalOnly ? setCloudLocalOnly(false) : setShowEditCloudProfile(true)}><View style={s.aiButton}><MaterialIcons name="cloud" size={16} color="#052e1c" /><Text style={s.aiButtonText}>{cloudLocalOnly ? 'Enable Cloud Login' : 'Complete Profile'}</Text></View></Pressable>
+            </View>
+          )}
+        </Section>
         <Section title="Your Settings">
           <Input label="Profile Name" value={String(profile.name)} onChange={v=>setProfile(p=>({...p,name:v}))}/>
           <Input label="Age" value={String(profile.age)} onChange={v=>setProfile(p=>({...p,age:num(v)}))}/><Input label="Height inches" value={String(profile.heightIn)} onChange={v=>setProfile(p=>({...p,heightIn:num(v)}))}/><Input label="Current weight" value={String(profile.weight)} onChange={v=>setProfile(p=>({...p,weight:num(v)}))}/><Input label="Goal weight" value={String(profile.goalWeight)} onChange={v=>setProfile(p=>({...p,goalWeight:num(v)}))}/><Input label="Gym days/week" value={String(profile.gymDaysPerWeek ?? 4)} onChange={v=>setProfile(p=>({...p,gymDaysPerWeek:num(v)}))}/><Input label="Daily calorie goal" value={String(profile.calorieGoal)} onChange={v=>setProfile(p=>({...p,calorieGoal:num(v)}))}/><Input label="Protein goal" value={String(profile.proteinGoal)} onChange={v=>setProfile(p=>({...p,proteinGoal:num(v)}))}/><Input label="Carb goal" value={String(profile.carbGoal ?? carbGoal)} onChange={v=>setProfile(p=>({...p,carbGoal:num(v)}))}/><Input label="Fat goal" value={String(profile.fatGoal ?? fatGoal)} onChange={v=>setProfile(p=>({...p,fatGoal:num(v)}))}/>
@@ -1082,9 +1273,48 @@ export default function App(){
       visible={showManualMeal}
       meal={manualMeal}
       onChange={setManualMeal}
+      isPrivate={manualMealPrivate}
+      onPrivacyChange={setManualMealPrivate}
       onClose={() => setShowManualMeal(false)}
       onSave={handleSaveManualMeal}
     />
+    <Modal visible={showMealLibrary} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowMealLibrary(false)}>
+      <SafeAreaView style={s.app}>
+        <View style={s.header}>
+          <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',gap:12}}>
+            <View style={{flex:1}}>
+              <Text style={s.title}>Meal Library</Text>
+              <Text style={s.sub}>Browse curated meals and add them to your menu</Text>
+            </View>
+            <Pressable onPress={() => setShowMealLibrary(false)} style={s.iconButton}><MaterialIcons name="close" size={22} color="#cbd5e1" /></Pressable>
+          </View>
+        </View>
+        <ScrollView contentContainerStyle={{padding:16,paddingBottom:34}}>
+          <CuratedMealLibrary
+            selectedIds={mealsState.map(meal => meal.id.replace(/^curated-/, ''))}
+            onAddMeal={handleAddCuratedMeal}
+          />
+        </ScrollView>
+      </SafeAreaView>
+    </Modal>
+    <Modal visible={showCommunityMeals} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowCommunityMeals(false)}>
+      <SafeAreaView style={s.app}>
+        <View style={s.header}>
+          <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',gap:12}}>
+            <View style={{flex:1}}>
+              <Text style={s.title}>Community Meals</Text>
+              <Text style={s.sub}>Discover meals shared by Calos users</Text>
+            </View>
+            <Pressable onPress={() => setShowCommunityMeals(false)} style={s.iconButton}><MaterialIcons name="close" size={22} color="#cbd5e1" /></Pressable>
+          </View>
+        </View>
+        <ScrollView contentContainerStyle={{padding:16,paddingBottom:34}}>
+          <CommunityMealLibrary onAddMeal={handleAddCommunityMeal} />
+        </ScrollView>
+      </SafeAreaView>
+    </Modal>
+    <EditProfileScreen visible={showEditCloudProfile} onClose={() => setShowEditCloudProfile(false)} onSaved={setCloudProfile} />
+    <UserSearchScreen visible={showUserSearch} onClose={() => setShowUserSearch(false)} />
     {editingMeal && (
       <MealEditModal
         visible={showMealEdit}
@@ -1126,6 +1356,15 @@ export default function App(){
         fatGoal={fatGoal}
       />
     )}
+    {tab === 'Workout' && workoutRunning && (
+      <WorkoutTimerBar
+        seconds={restSeconds > 0 ? restSeconds : workoutSeconds}
+        restActive={restSeconds > 0}
+        low={restSeconds > 0 && restSeconds <= 15}
+        detail={workoutTimerDetail}
+        onSkipRest={() => setRestSeconds(0)}
+      />
+    )}
     <BottomTabBar
       activeTab={tab}
       moreActive={secondaryTabs.includes(tab as MoreTab)}
@@ -1133,6 +1372,14 @@ export default function App(){
       onMore={() => setShowMoreMenu(true)}
     />
   </SafeAreaView>
+}
+
+export default function App(){
+  return (
+    <SafeAreaProvider>
+      <AppInner />
+    </SafeAreaProvider>
+  );
 }
 
 function Metric({label,value}:{label:string;value:number}){ return <View style={s.metric}><Text style={s.metricValue}>{Math.round(value)}</Text><Text style={s.metricLabel}>{label}</Text></View> }
@@ -1203,7 +1450,7 @@ function todayKeyFromDate(date: Date) {
   return `${year}-${month}-${day}`;
 }
 
-function ManualMealModal({visible, meal, onChange, onClose, onSave}:{visible:boolean; meal:Meal; onChange:(meal:Meal)=>void; onClose:()=>void; onSave:()=>void}) {
+function ManualMealModal({visible, meal, onChange, isPrivate, onPrivacyChange, onClose, onSave}:{visible:boolean; meal:Meal; onChange:(meal:Meal)=>void; isPrivate:boolean; onPrivacyChange:(value:boolean)=>void; onClose:()=>void; onSave:()=>void}) {
   const update = (patch: Partial<Meal>) => onChange({...meal, ...patch});
 
   return (
@@ -1224,6 +1471,10 @@ function ManualMealModal({visible, meal, onChange, onClose, onSave}:{visible:boo
             <View style={s.formHalf}><Input label="Fat" value={String(meal.fat || '')} onChange={v=>update({fat:num(v)})}/></View>
           </View>
           <Input label="Notes" value={meal.notes} onChange={v=>update({notes:v})}/>
+          <Pressable onPress={()=>onPrivacyChange(!isPrivate)} style={[s.manualButton, {marginBottom:10}]}>
+            <MaterialIcons name={isPrivate ? 'lock' : 'public'} size={16} color="#cbd5e1" />
+            <Text style={s.manualButtonText}>{isPrivate ? 'Private meal — stays only on your account' : 'Public meal — others can discover this'}</Text>
+          </Pressable>
           <Pressable onPress={onSave} style={s.saveWide}><MaterialIcons name="check" size={18} color="#052e1c" /><Text style={s.saveWideText}>Save Meal</Text></Pressable>
         </View>
       </KeyboardAvoidingView>

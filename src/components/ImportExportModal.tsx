@@ -27,15 +27,23 @@ export function ImportExportModal({ visible, type, items, onClose, onImport }: I
   const [mode, setMode] = useState<'export' | 'import'>('export');
   const [importText, setImportText] = useState('');
   const [copied, setCopied] = useState(false);
+  const [exportSelection, setExportSelection] = useState<{ start: number; end: number } | undefined>(undefined);
 
   const exportJson = useMemo(() => {
     return type === 'meal' ? generateMealJSON(items) : generateWorkoutJSON(items);
   }, [type, items]);
 
+  const importPrompt = useMemo(() => {
+    return type === 'meal'
+      ? `Ask AI: "Create meals for my goals and return only importable Calos JSON using this exact shape: { \"type\": \"meal_batch\", \"meals\": [{ \"name\": \"Meal name\", \"type\": \"Breakfast\", \"calories\": 500, \"protein\": 40, \"carbs\": 55, \"fat\": 14, \"notes\": \"Measured recipe, ingredients, instructions, storage, reheating.\" }] }. Use Breakfast, Lunch, Dinner, or Snack only."`
+      : `Ask AI: "Transform my workout into importable Calos JSON and return only JSON using this exact shape: { \"type\": \"workout_routine\", \"workouts\": [{ \"id\": \"push\", \"name\": \"Push\", \"cardioMin\": 10, \"backup\": [\"Dumbbell floor press 4x8-12\"], \"exercises\": [{ \"id\": \"bench\", \"name\": \"Bench Press\", \"sets\": 4, \"minReps\": 6, \"maxReps\": 8, \"weight\": 135, \"lastReps\": [0,0,0,0], \"lastWeights\": [135,135,135,135], \"backup\": \"Dumbbell Bench Press\", \"backupOptions\": [\"Dumbbell Bench Press\", \"Machine Chest Press\", \"Push-up\"], \"selectedBackup\": \"Dumbbell Bench Press\" }] }] }."`;
+  }, [type]);
+
   const handleCopy = () => {
+    setExportSelection({ start: 0, end: exportJson.length });
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
-    Alert.alert('JSON ready', 'Select the JSON text above to copy it, then paste it into ChatGPT or another tool.');
+    Alert.alert('JSON selected', 'The export text is selected. Use the iOS copy menu to copy it.');
   };
 
   const handleImport = () => {
@@ -101,12 +109,16 @@ export function ImportExportModal({ visible, type, items, onClose, onImport }: I
 
             {mode === 'export' && (
               <View style={s.content}>
-                <Text style={s.description}>
-                  Copy this JSON and share it with ChatGPT or another tool to customize further. You can also import the response back into the app.
-                </Text>
-                <ScrollView style={s.jsonBox} scrollEnabled={true}>
-                  <Text style={s.jsonText}>{exportJson}</Text>
-                </ScrollView>
+                <Text style={s.description}>Copy this export or select all from the box. You can paste it into AI and import the updated JSON back into Calos.</Text>
+                <TextInput
+                  style={s.jsonInput}
+                  value={exportJson}
+                  multiline
+                  editable={false}
+                  selectTextOnFocus
+                  selection={exportSelection}
+                  onFocus={() => setExportSelection({ start: 0, end: exportJson.length })}
+                />
                 <Pressable
                   onPress={handleCopy}
                   style={s.copyButton}
@@ -119,9 +131,10 @@ export function ImportExportModal({ visible, type, items, onClose, onImport }: I
 
             {mode === 'import' && (
               <View style={s.content}>
-                <Text style={s.description}>
-                  Paste JSON from ChatGPT or an exported batch here. The app will validate the format and import valid {type}s.
-                </Text>
+                <Text style={s.description}>Paste JSON from AI or an exported batch here. Calos will find valid {type} JSON even if the AI included extra text.</Text>
+                <View style={s.promptBox}>
+                  <Text selectable style={s.promptText}>{importPrompt}</Text>
+                </View>
                 <TextInput
                   style={s.importInput}
                   multiline
@@ -226,7 +239,7 @@ const s = StyleSheet.create({
     lineHeight: 18,
     marginBottom: 8,
   },
-  jsonBox: {
+  jsonInput: {
     backgroundColor: '#0b1220',
     borderWidth: 1,
     borderColor: '#243244',
@@ -234,13 +247,14 @@ const s = StyleSheet.create({
     padding: 12,
     maxHeight: 250,
     minHeight: 150,
-  },
-  jsonText: {
     color: '#cbd5e1',
     fontSize: 11,
     lineHeight: 14,
     fontFamily: 'Courier New',
+    textAlignVertical: 'top',
   },
+  promptBox: { backgroundColor: '#0b1220', borderWidth: 1, borderColor: '#243244', borderRadius: 12, padding: 10, marginBottom: 8 },
+  promptText: { color: '#cbd5e1', fontSize: 12, lineHeight: 17 },
   copyButton: {
     backgroundColor: '#34d399',
     borderRadius: 12,

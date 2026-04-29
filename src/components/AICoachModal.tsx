@@ -8,13 +8,13 @@ import {
   ScrollView,
   Pressable,
   TextInput,
-  SafeAreaView,
   ActivityIndicator,
   FlatList,
   Vibration,
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { sendChatMessage, parseMealPlanFromResponse, parseWorkoutRoutineFromResponse, ChatMessage, MealPlanResponse, WorkoutRoutineResponse, ProfileContext, DayContext, MealCatalogItem } from '../services/openaiService';
 
@@ -31,6 +31,7 @@ interface AICoachModalProps {
 }
 
 export function AICoachModal({ visible, profile, mode = 'nutrition', workouts = [], dayContext, currentMeals = [], onClose, onSaveMeals, onSaveWorkout }: AICoachModalProps) {
+  const insets = useSafeAreaInsets();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [userInput, setUserInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -47,13 +48,33 @@ export function AICoachModal({ visible, profile, mode = 'nutrition', workouts = 
   const [expandedResultMeals, setExpandedResultMeals] = useState<Record<number, boolean>>({});
   const scrollViewRef = useRef<ScrollView>(null);
 
+  const shouldAcceptWorkoutJson = (message: string) => {
+    const text = message.toLowerCase();
+    return [
+      'swap',
+      'replace exercise',
+      'change exercise',
+      'can we fix',
+      'update my workout',
+      'update my routine',
+      'saveable',
+      'json',
+      'apply this',
+      'change split',
+      'switch split',
+      'rebuild',
+      'full replacement',
+      'new routine',
+    ].some(term => text.includes(term));
+  };
+
   useEffect(() => {
     if (visible) {
       const greeting: ChatMessage = {
         role: 'assistant',
         content: mode === 'workout'
-          ? `Hi ${profile.name}. I already have your goal, calorie target, macro targets, body stats, planned gym days, saved workout preferences, and your current routine.\n\nI can edit one thing in your current plan without rebuilding everything, review the whole routine, swap exercises you dislike, or build a full replacement routine. If you ask for a saveable change, I’ll return the full updated workout JSON with only the needed changes.`
-          : `Hi ${profile.name}. I already have your goal, calorie target, macro targets, body stats, saved meal preferences, and your current meal menu.\n\nToday you have about ${Math.round(dayContext?.caloriesLeft ?? 0)} calories, ${Math.round(dayContext?.proteinLeft ?? 0)}g protein, ${Math.round(dayContext?.carbsLeft ?? 0)}g carbs, and ${Math.round(dayContext?.fatLeft ?? 0)}g fat left. I can suggest quick snacks, generate new meal options, or help modify an existing meal while preserving the rest of your menu.`,
+          ? `Hi ${profile.name}. I have your current workout plan, profile, macro targets, and recent day context.\n\nI can review whether your current plan is on track, explain what to improve, swap one exercise while preserving the rest, suggest backup options, or explain how to do an exercise. I will not replace your whole routine unless you explicitly ask to change your split or rebuild the plan.`
+          : `Hi ${profile.name}. I have your macro targets, today's remaining macros, and your current meal menu.\n\nI can help create new meal recipes to add to your menu, fit a meal to certain macros, or estimate what you ate today by asking portion questions. I’m not here to force a full-day meal plan unless you specifically ask for one.`,
       };
       setMessages([greeting]);
       setUserInput('');
@@ -132,7 +153,11 @@ export function AICoachModal({ visible, profile, mode = 'nutrition', workouts = 
         setExpandedResultMeals({});
       }
 
-      const workoutRoutine = parseWorkoutRoutineFromResponse(response);
+      const workoutRoutine = mode === 'workout' && shouldAcceptWorkoutJson(userMessage)
+        ? parseWorkoutRoutineFromResponse(response)
+        : mode === 'nutrition'
+          ? parseWorkoutRoutineFromResponse(response)
+          : null;
       if (workoutRoutine) {
         setWorkoutRoutineResult(workoutRoutine);
         setExerciseFeedback({});
@@ -163,50 +188,18 @@ export function AICoachModal({ visible, profile, mode = 'nutrition', workouts = 
     await sendMessageToAI(userInput.trim());
   };
 
-  const handleBuildRoutine = async () => {
-    const request = `Build me a complete savable workout routine.
-
-Use my full profile:
-- Name: ${profile.name || 'User'}
-- Goal: ${profile.goal || 'cut'}
-- Current weight: ${profile.weight} lb
-- Goal weight: ${profile.goalWeight ?? 'not specified'} lb
-- Height: ${profile.heightIn ?? 'not specified'} in
-- Age: ${profile.age ?? 'not specified'}
-- Sex: ${profile.sex ?? 'not specified'}
-- Daily calories: ${profile.calorieGoal ?? 'not specified'}
-- Daily protein: ${profile.proteinGoal ?? 'not specified'}g
-- Daily carbs: ${profile.carbGoal ?? 'not specified'}g
-- Daily fat: ${profile.fatGoal ?? 'not specified'}g
-- Weekly weight loss target: ${profile.weeklyLossRate ?? 1} lb/week
-- Planned gym days: ${profile.gymDaysPerWeek ?? 4} days/week
-- Calories left today: ${Math.round(dayContext?.caloriesLeft ?? 0)}
-- Protein left today: ${Math.round(dayContext?.proteinLeft ?? 0)}g
-- Carbs left today: ${Math.round(dayContext?.carbsLeft ?? 0)}g
-- Fat left today: ${Math.round(dayContext?.fatLeft ?? 0)}g
-- Cardio remaining today: ${Math.round(dayContext?.cardioRemaining ?? 0)} calories
-- Saved workout time preference: ${profile.workoutPreferences?.timePerWorkout || 'not specified'}
-- Saved workout style: ${profile.workoutPreferences?.workoutStyle || 'not specified'}
-- Saved gym/equipment setup: ${profile.workoutPreferences?.equipmentAccess || profile.workoutPreferences?.gymType || 'not specified'}
-- Saved liked exercises/goals: ${profile.workoutPreferences?.likedExercises || 'not specified'}
-- Saved limitations/dislikes: ${profile.workoutPreferences?.trainingLimits || 'not specified'}
-- Saved extra workout notes: ${profile.workoutPreferences?.additionalNotes || 'none'}
-- Time available per workout for this request: ${timePerWorkout}
-
-My ideal physique: ${physiqueFocus}
-Equipment available: ${equipmentAccess}
-Exercises/training I like: ${likedTraining}
-Limitations, injuries, dislikes, or substitutions needed: ${trainingLimits}
-
-If you need more detail before creating a high-confidence plan, ask me targeted questions first. Otherwise build a ${profile.gymDaysPerWeek ?? 4}-day weekly routine that preserves muscle during fat loss, develops the ideal physique above, covers every major muscle group, avoids lazy workouts, includes backups, and returns the strict savable JSON format.`;
-
+  const handleWorkoutQuickAction = async (request: string) => {
     await sendMessageToAI(request);
   };
 
   const handleBuildMealBatch = async () => {
     const count = Math.max(3, Math.min(20, Number(mealCount) || 8));
-    const request = `Generate ${count} new meal options for my meal menu. Use my saved meal preferences, allergies, dislikes, prep-time preferences, extra notes, usual workout time (${profile.workoutPreferences?.usualWorkoutTime || 'not specified'}), and daily macro targets from my profile. Aim for options that help me stay near ${profile.calorieGoal ?? 'my'} calories, ${profile.proteinGoal ?? 'my'}g protein, ${profile.carbGoal ?? 'my'}g carbs, and ${profile.fatGoal ?? 'my'}g fat across the day. Bias more carbs into pre-workout meals/snacks when workout time is known, and make post-workout meals high-protein and filling. Every meal must be an exact recipe with measured ingredients, raw/cooked weight notes, full cooking steps, heat level or oven/air-fryer temperature, cook time, internal temperature where relevant, doneness cues, storage/reheat notes, macro tracking notes, and exact macros. Do not use vague options like fish/salmon, protein of choice, vegetables, or sauce of choice. Do not repeat meals already in my current menu. Make them ready to save into the app as selectable meal options.`;
+    const request = `Generate ${count} creative meal recipe options I can add to my meal menu. Ask one clarifying question first only if you need to know meal type, ingredients, cuisine, cooking time, or target macros. Otherwise use my current macro targets and today's remaining macros as context. These should be individual meals, not a full-day plan. Every meal must include exact measured ingredients, realistic macros, full cooking instructions, storage/reheat notes, and be ready to save into the app as selectable meal options. Do not repeat meals already in my current menu.`;
     await sendMessageToAI(request, count);
+  };
+
+  const handleNutritionQuickAction = async (request: string) => {
+    await sendMessageToAI(request);
   };
 
   const handleSaveMealPlan = () => {
@@ -360,14 +353,14 @@ If you need more detail before creating a high-confidence plan, ask me targeted 
 
   return (
     <Modal visible={visible} animationType="slide">
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
           style={styles.keyboardAvoid}
         >
           {/* Header */}
-          <View style={styles.header}>
+          <View style={[styles.header, { paddingTop: Math.max(18, insets.top + 10) }]}>
             <Pressable onPress={onClose} style={styles.closeButton}>
               <MaterialIcons name="close" size={24} color="#fff" />
             </Pressable>
@@ -387,29 +380,46 @@ If you need more detail before creating a high-confidence plan, ask me targeted 
         >
           {mode === 'workout' && (
             <View style={styles.builderPanel}>
-              <Text style={styles.builderTitle}>Build My Routine</Text>
-              <Text style={styles.builderHelp}>Customize what you want and what your gym has. Ask for questions first if you want the AI to interview you before drafting. When a routine appears below, you can replace your current workout regime or ask for substitutions first.</Text>
-              <Text style={styles.fieldLabel}>Time per workout</Text>
-              <TextInput style={styles.builderInput} value={timePerWorkout} onChangeText={setTimePerWorkout} multiline placeholderTextColor="#64748b" />
-              <Text style={styles.fieldLabel}>Ideal physique</Text>
-              <TextInput style={styles.builderInput} value={physiqueFocus} onChangeText={setPhysiqueFocus} multiline placeholderTextColor="#64748b" />
-              <Text style={styles.fieldLabel}>Gym equipment</Text>
-              <TextInput style={styles.builderInput} value={equipmentAccess} onChangeText={setEquipmentAccess} multiline placeholderTextColor="#64748b" />
-              <Text style={styles.fieldLabel}>Exercises you like</Text>
-              <TextInput style={styles.builderInput} value={likedTraining} onChangeText={setLikedTraining} multiline placeholderTextColor="#64748b" />
-              <Text style={styles.fieldLabel}>Limits or dislikes</Text>
-              <TextInput style={styles.builderInput} value={trainingLimits} onChangeText={setTrainingLimits} multiline placeholderTextColor="#64748b" />
-              <Pressable onPress={handleBuildRoutine} disabled={loading} style={[styles.saveMealPlanButton, loading && styles.sendButtonDisabled]}>
-                <MaterialIcons name="auto-awesome" size={18} color="#052e1c" />
-                <Text style={styles.saveMealPlanText}>Build Routine</Text>
-              </Pressable>
+              <Text style={styles.builderTitle}>Workout Coach</Text>
+              <Text style={styles.builderHelp}>Ask about your current plan, progress, exercise swaps, form help, or whether anything needs adjustment. Full routine replacement only happens if you explicitly ask to change your split.</Text>
+              <View style={styles.quickActions}>
+                <Pressable disabled={loading} onPress={() => handleWorkoutQuickAction('Review my current workout plan. Tell me if it is on track for my goal, what is strong, what is weak, and the top 3 improvements. Do not replace the routine.')} style={styles.quickActionButton}>
+                  <Text style={styles.quickActionText}>Review plan</Text>
+                </Pressable>
+                <Pressable disabled={loading} onPress={() => handleWorkoutQuickAction('Based on my current plan and today context, am I on track? Tell me what to improve this week without changing my routine.')} style={styles.quickActionButton}>
+                  <Text style={styles.quickActionText}>Am I on track?</Text>
+                </Pressable>
+                <Pressable disabled={loading} onPress={() => handleWorkoutQuickAction('I want to swap one exercise in my current routine. Ask me which exercise and what equipment or limitation is causing the issue. Preserve the rest of the plan.')} style={styles.quickActionButton}>
+                  <Text style={styles.quickActionText}>Swap one exercise</Text>
+                </Pressable>
+                <Pressable disabled={loading} onPress={() => handleWorkoutQuickAction('I need help learning an exercise. Ask which exercise, then explain form cues, common mistakes, setup, and include a YouTube search link for a demo.')} style={styles.quickActionButton}>
+                  <Text style={styles.quickActionText}>Exercise demo</Text>
+                </Pressable>
+                <Pressable disabled={loading} onPress={() => handleWorkoutQuickAction('I am considering changing my split. Interview me like the intake flow before suggesting a new split. Do not return JSON until I explicitly say to build and save the replacement routine.')} style={styles.quickActionButton}>
+                  <Text style={styles.quickActionText}>Change split</Text>
+                </Pressable>
+              </View>
             </View>
           )}
 
           {mode === 'nutrition' && (
             <View style={styles.builderPanel}>
-              <Text style={styles.builderTitle}>Build Meal Options</Text>
-              <Text style={styles.builderHelp}>Choose how many new meal options you want. The AI will use your profile, today's remaining calories/protein, and the meals already in your menu so it does not repeat them.</Text>
+              <Text style={styles.builderTitle}>Meal Creative Partner</Text>
+              <Text style={styles.builderHelp}>Create new recipes for your menu, fit one meal to macros, or estimate something you already ate. The AI should ask portion or ingredient questions when it needs more detail.</Text>
+              <View style={styles.quickActions}>
+                <Pressable disabled={loading} onPress={() => handleNutritionQuickAction('I want new meal ideas. Ask me what meal type, ingredients, cuisine, cooking time, and macro target I want before generating recipes.')} style={styles.quickActionButton}>
+                  <Text style={styles.quickActionText}>Meal ideas</Text>
+                </Pressable>
+                <Pressable disabled={loading} onPress={() => handleNutritionQuickAction(`Suggest a meal that fits roughly my remaining macros today: ${Math.round(dayContext?.caloriesLeft ?? 0)} calories, ${Math.round(dayContext?.proteinLeft ?? 0)}g protein, ${Math.round(dayContext?.carbsLeft ?? 0)}g carbs, and ${Math.round(dayContext?.fatLeft ?? 0)}g fat. Ask what kind of food I want first if needed.`)} style={styles.quickActionButton}>
+                  <Text style={styles.quickActionText}>Fit macros</Text>
+                </Pressable>
+                <Pressable disabled={loading} onPress={() => handleNutritionQuickAction('I ate something today and want to estimate macros. Ask me targeted portion questions first, then return a saveable meal JSON estimate once you have enough detail.')} style={styles.quickActionButton}>
+                  <Text style={styles.quickActionText}>Estimate what I ate</Text>
+                </Pressable>
+                <Pressable disabled={loading} onPress={() => handleNutritionQuickAction('Give me high-protein snack ideas I can add to my meal menu. Ask about sweet vs savory and calories if needed.')} style={styles.quickActionButton}>
+                  <Text style={styles.quickActionText}>Snack ideas</Text>
+                </Pressable>
+              </View>
               <Text style={styles.fieldLabel}>How many meal options?</Text>
               <TextInput
                 style={styles.builderInput}
@@ -421,7 +431,7 @@ If you need more detail before creating a high-confidence plan, ask me targeted 
               <Text style={styles.builderHint}>Current meal menu: {currentMeals.length} saved options</Text>
               <Pressable onPress={handleBuildMealBatch} disabled={loading} style={[styles.saveMealPlanButton, loading && styles.sendButtonDisabled]}>
                 <MaterialIcons name="restaurant-menu" size={18} color="#052e1c" />
-                <Text style={styles.saveMealPlanText}>Generate Meal Options</Text>
+                <Text style={styles.saveMealPlanText}>Generate Recipe Options</Text>
               </Pressable>
             </View>
           )}
@@ -449,10 +459,10 @@ If you need more detail before creating a high-confidence plan, ask me targeted 
             </View>
           ))}
 
-          {/* Meal Plan Result */}
+          {/* Meal Result */}
           {mode === 'nutrition' && mealPlanResult && (
             <View style={styles.mealPlanContainer}>
-              <Text style={styles.mealPlanTitle}>Importable Meal Options</Text>
+              <Text style={styles.mealPlanTitle}>Addable Meal Recipes</Text>
               <Text style={styles.mealPlanSummary}>{mealPlanResult.summary} Add one meal or add all meals to make them selectable in your Meals tab.</Text>
 
               <View style={styles.mealPlanStats}>
@@ -544,8 +554,8 @@ If you need more detail before creating a high-confidence plan, ask me targeted 
 
           {mode === 'workout' && workoutRoutineResult && (
             <View style={styles.mealPlanContainer}>
-              <Text style={styles.mealPlanTitle}>Generated Routine</Text>
-              <Text style={styles.mealPlanSummary}>{workoutRoutineResult.summary}</Text>
+              <Text style={styles.mealPlanTitle}>Proposed Plan Update</Text>
+              <Text style={styles.mealPlanSummary}>{workoutRoutineResult.summary} This only changes your routine if you tap apply.</Text>
               <View style={styles.recommendationsBox}>
                 <Text style={styles.recTitle}>Physique Focus</Text>
                 <Text style={styles.recItem}>{workoutRoutineResult.physiqueFocus}</Text>
@@ -587,15 +597,15 @@ If you need more detail before creating a high-confidence plan, ask me targeted 
               )}
               <Pressable onPress={handleSaveWorkoutRoutine} style={styles.saveMealPlanButton}>
                 <MaterialIcons name="save" size={18} color="#052e1c" />
-                <Text style={styles.saveMealPlanText}>Use as Current Workout Regime</Text>
+                <Text style={styles.saveMealPlanText}>Apply Workout Update</Text>
               </Pressable>
             </View>
           )}
 
           {mode === 'workout' && messages.length > 1 && !workoutRoutineResult && (
             <View style={styles.importHintBox}>
-              <Text style={styles.importHintTitle}>Want to save a routine?</Text>
-              <Text style={styles.importHintText}>Ask: “Return this as app-importable workout JSON.” When the plan appears, you can replace your current workout regime with it and still ask for substitutions first.</Text>
+              <Text style={styles.importHintTitle}>Want to apply a change?</Text>
+              <Text style={styles.importHintText}>Ask for one exercise or backup change directly. For a new split, have the coach interview you first, then say you are ready to build the replacement.</Text>
             </View>
           )}
 
@@ -613,7 +623,7 @@ If you need more detail before creating a high-confidence plan, ask me targeted 
           <View style={styles.inputContainer}>
           <TextInput
             style={styles.input}
-            placeholder={mode === 'workout' ? 'Ask for routine help or calorie makeup...' : 'Ask for snacks that fit your calories/protein...'}
+            placeholder={mode === 'workout' ? 'Ask about your current plan, swaps, form, or progress...' : 'Ask for snacks that fit your calories/protein...'}
             placeholderTextColor="#64748b"
             value={userInput}
             onChangeText={setUserInput}
@@ -966,6 +976,24 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
     marginBottom: 10,
+  },
+  quickActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  quickActionButton: {
+    backgroundColor: '#0b1220',
+    borderWidth: 1,
+    borderColor: '#243244',
+    borderRadius: 999,
+    paddingHorizontal: 11,
+    paddingVertical: 8,
+  },
+  quickActionText: {
+    color: '#cbd5e1',
+    fontSize: 12,
+    fontWeight: '800',
   },
   fieldLabel: {
     color: '#cbd5e1',

@@ -191,7 +191,7 @@ function formatStringList(value: any): string[] {
 }
 
 function createSystemPrompt(profile: ProfileContext, dayContext?: DayContext, currentMeals: MealCatalogItem[] = []): string {
-  return `You are an expert fitness nutrition coach helping ${profile.name} create a personalized meal plan.
+  return `You are an expert fitness nutrition coach helping ${profile.name} create individual meal recipes and estimate food logs.
 
 THEIR GOALS:
 - Primary Goal: ${profile.goal === 'cut' ? 'CUTTING (lose fat, maintain muscle)' : profile.goal === 'bulk' ? 'BULKING (build muscle)' : 'MAINTAINING (stay at current weight)'}
@@ -217,31 +217,37 @@ CURRENT SAVED MEAL MENU:
 ${formatCurrentMealMenu(currentMeals)}
 
 YOUR JOB IS TO:
-1. Do not ask for the user's goal, calories, protein, carbs, fats, current weight, goal weight, weekly loss rate, gym frequency, or saved food preferences when already provided above. The app already provided those. Only ask for missing food preferences when needed.
-   Make it clear that any meal JSON you generate can be imported into the app as available meal options for daily use, and the user can add one meal at a time or add all meals.
-   If the user asks to change, replace, remove, or fix one existing meal, use CURRENT SAVED MEAL MENU as the source of truth and preserve everything else unless the user asks for broader changes.
+1. Be a creative meal partner, not a full-day meal-plan generator by default.
+   Help the user create individual recipes they can add to their meal menu, fit one meal or snack to target macros, or estimate something they already ate.
+   Do not build a full-day plan unless the user explicitly asks for a full day.
+   Do not ask for the user's goal, calories, protein, carbs, fats, current weight, goal weight, weekly loss rate, gym frequency, or saved food preferences when already provided above.
 
-2. If the user asks what to eat with calories/protein/carbs/fats remaining, give smart snack or meal options that fit the remaining numbers:
+2. If the user wants meal ideas, ask short targeted questions only if needed:
+   - What meal type? breakfast, lunch, dinner, snack
+   - Any macro target? calories, protein, carbs, fat
+   - What ingredients do they want included or avoided?
+   - What cuisine/flavor?
+   - How much time do they want to spend?
+   If enough detail is already provided, generate several addable recipes immediately.
+
+3. If the user asks what to eat with calories/protein/carbs/fats remaining, give smart snack or meal options that fit the remaining numbers:
    - Use the calories, protein, carbs, and fat left from TODAY when available.
    - Prioritize high-protein options for fat loss.
    - Give exact portions and estimated macros.
    - If calories are low but protein is high, suggest lean protein-only options.
    - If calories are high and protein is low, suggest fuller meals.
 
-3. Ask SPECIFIC questions about food preferences in this order only when building a broader meal plan:
-   - PROTEINS first: Give examples like "chicken, turkey, beef, fish, Greek yogurt, cottage cheese, etc." and ask which they like/hate
-   - CARBS: Examples: "rice, pasta, oats, bread, potatoes, fruits, etc."
-   - FATS: Examples: "olive oil, nuts, nut butters, avocado, etc."
-   - FLAVOR PROFILES: Sweet, savory, spicy, bland? Prefer sauces or plain?
-   - SNACKS: What do they snack on? Healthy or indulgent preferences?
-   - PREPARATION TIME: How much time to spend cooking? (quick meals vs. meal prep?)
-   - ALLERGIES/RESTRICTIONS: Any dietary restrictions, intolerances, or foods they absolutely won't eat?
+4. If the user tells you what they already ate today, act like a nutrition estimator:
+   - Ask targeted portion questions when needed before estimating, such as cooked/raw weight, restaurant size, sauce/oil amount, drink size, or number of servings.
+   - If there is enough detail, estimate calories, protein, carbs, and fat, then return a saveable meal JSON item so the app can add it to the meal menu and log/select it.
+   - Name it clearly, for example "Logged Chipotle Chicken Bowl Estimate".
+   - Be transparent that it is an estimate and include the assumptions in notes.
 
-4. GIVE EXAMPLES, not open-ended questions:
+5. GIVE EXAMPLES, not open-ended questions:
    Instead of: "What proteins do you like?"
    Say: "Do you prefer chicken and turkey, or would you rather include beef? And how about fish - like it or not a fan?"
    
-5. Create meals SPECIFICALLY tailored to their answers:
+6. Create meals SPECIFICALLY tailored to their answers:
    - For CUTTING: Higher protein, lower fat, filling foods
    - For BULKING: Calorie-dense options, muscle-building combinations
    - For MAINTAINING: Balanced macros, sustainable foods
@@ -249,7 +255,7 @@ YOUR JOB IS TO:
    - Use exact foods and exact measurements. Never write vague paired options like "fish/salmon", "chicken/turkey", "rice or potatoes", or "veggies". Pick one exact ingredient and measure it in grams, ounces, cups, tablespoons, or units.
    - Macro accuracy matters: base macros on the exact measured ingredients and cooked/raw state you specify. Say whether weights are raw or cooked. Make calories/protein/carbs/fat internally consistent with the ingredient amounts.
 
-6. Build the meals as modular "building blocks" for their daily target:
+7. Build meals as modular "building blocks" for their daily target:
    - Breakfast blocks should usually be 20-30% of daily calories and 25-40g protein
    - Lunch/dinner blocks should usually be 25-35% of daily calories and 35-55g protein
    - Snack blocks should usually be 8-15% of daily calories and 15-30g protein
@@ -259,16 +265,7 @@ YOUR JOB IS TO:
    - Prefer lean proteins, high-volume carbs/produce, and controlled fats when the goal is fat loss
    - If the user's usual workout time is provided, bias more daily carbs into the meal or snack before training and make the post-workout meal high-protein and filling.
    
-7. Build a complete meal plan (5-6 meals) that:
-   - Hits their calorie target (${profile.calorieGoal} ± 50)
-   - Hits their protein target (${profile.proteinGoal}g ± 5)
-   - Stays near their carb target (${profile.carbGoal ?? 'not specified'}g) and fat target (${profile.fatGoal ?? 'not specified'}g) when those targets are provided
-   - Uses ONLY foods they said they like
-   - Avoids foods they dislike/can't eat
-   - Matches their prep time preference
-   - Includes flavor profiles they prefer
-
-8. When you generate any meals that should be saved into the app, format them exactly as this importable JSON. Do not rename "meals" or the app cannot import them:
+8. When you generate any meals or food estimates that should be saved into the app, format them exactly as this importable JSON. Do not rename "meals" or the app cannot import them:
 \`\`\`json
 {
   "meals": [
@@ -285,16 +282,16 @@ YOUR JOB IS TO:
       "notes": "prep timing, storage, reheat, weighing/macro accuracy notes, and macro-safe swap notes"
     }
   ],
-  "summary": "Brief summary of the meal plan and why it fits their goals",
+  "summary": "Brief summary of the meal ideas or food estimate and why it fits",
   "totalCalories": number,
   "totalProtein": number,
   "recommendations": ["tip 1", "tip 2", "tip 3"]
 }
 \`\`\`
 
-9. If the user wants to edit the current meal menu, return the full replacement meal list in the same JSON format with the requested change applied and all unchanged meals preserved. Keep existing meal names/macros/notes unchanged unless they conflict with the user's request.
+9. If the user wants to edit one existing meal, return the updated meal JSON for that meal. Do not replace the full menu unless they explicitly ask for a full menu replacement.
 
-START by greeting ${profile.name} and summarizing the targets you already know, including calories, protein, carbs, and fat when provided. Offer two paths: quick foods for today's remaining macros, or a full meal plan based on food preferences. Do not ask what their fitness goal is.`;
+START by offering useful paths: recipe ideas, fit a meal to macros, or estimate what they ate. Do not ask what their fitness goal is.`;
 }
 
 function createMealBatchPrompt(
@@ -305,7 +302,7 @@ function createMealBatchPrompt(
 ): string {
   const existing = formatCurrentMealMenu(currentMeals);
 
-  return `You are an expert fitness nutrition coach helping ${profile.name} generate new meal options that can be added to the app.
+  return `You are an expert fitness nutrition coach helping ${profile.name} generate individual meal recipes that can be added to the app.
 
 THEIR GOALS:
 - Primary Goal: ${profile.goal === 'cut' ? 'CUTTING (lose fat, maintain muscle)' : profile.goal === 'bulk' ? 'BULKING (build muscle)' : 'MAINTAINING (stay at current weight)'}
@@ -329,11 +326,11 @@ CURRENT MEAL MENU TO AVOID REPEATING OR EDITING FROM:
 ${existing}
 
 YOUR JOB:
-1. Generate exactly ${mealCount} NEW meal options unless the user explicitly asks for fewer.
+1. Generate exactly ${mealCount} NEW individual meal recipe options unless the user explicitly asks for fewer. Do not create a full-day plan unless explicitly asked.
 2. Avoid repeating any current meal name or obvious near-duplicate variants of current meals. If the user asked to edit existing meals, preserve unchanged meals and only modify what they requested.
-3. If the user asked for a large batch, spread the meals across breakfast, lunch, dinner, and snack options.
+3. If the user asked for a large batch without specifying meal type, spread the meals across breakfast, lunch, dinner, and snack options.
 4. Make the meals different enough that the app has real variety for multiple days.
-5. Keep each option useful for the daily macro targets: ${profile.calorieGoal} calories, ${profile.proteinGoal}g protein, ${profile.carbGoal ?? 'target'}g carbs, and ${profile.fatGoal ?? 'target'}g fat.
+5. Keep each option useful as one modular meal for the daily macro targets: ${profile.calorieGoal} calories, ${profile.proteinGoal}g protein, ${profile.carbGoal ?? 'target'}g carbs, and ${profile.fatGoal ?? 'target'}g fat.
 6. Every meal must be a complete exact recipe with measured ingredients and cooking instructions. Never use vague choices like "fish/salmon", "protein of choice", "mixed vegetables", or "sauce of choice"; choose one exact ingredient and measured amount.
 7. Macro accuracy matters. Specify whether each measured ingredient is raw or cooked, and ensure calories/protein/carbs/fat match those exact amounts. Include oven/pan/air-fryer temperature, cooking time, target internal temperature for meat/fish, doneness cues, meal-prep storage, and reheating instructions.
 8. Use importable JSON exactly in the "meals" field so the app can add one meal or all meals.
@@ -367,7 +364,7 @@ Do not include duplicate meals from the current menu. If this is an edit request
 }
 
 function createWorkoutSystemPrompt(profile: ProfileContext, workouts: any[] = [], dayContext?: DayContext): string {
-  return `You are an expert strength coach reviewing and building workout routines for ${profile.name}.
+  return `You are an expert strength coach for Calos. Your default job is to coach ${profile.name} on their CURRENT routine, not to replace it.
 
 USER CONTEXT:
 - Goal: ${profile.goal}
@@ -392,18 +389,17 @@ ${formatDayContext(dayContext)}
 CURRENT ROUTINE JSON:
 ${JSON.stringify(workouts, null, 2)}
 
-YOUR JOB:
-1. Review whether the routine covers chest, back, shoulders, quads, hamstrings/glutes, calves, biceps, triceps, and core.
-2. Identify lazy or low-quality programming: too few hard sets, missing compounds, no progression, too much overlap, poor recovery, or ignored legs/back.
-3. Recommend ideal exercises, sets, rep ranges, and rest times for the user's planned days per week.
-4. Keep advice practical for fat loss: preserve muscle, keep progressive overload, avoid junk volume, and manage recovery.
-5. Before replacing the user's full workout plan, ask targeted questions until you are confident. Do not re-ask for workout length, equipment, limitations, style, or liked exercises if they are already present in SAVED WORKOUT PREFERENCES. If the user explicitly says to build now, you may create a draft and say they can ask to swap exercises before saving.
-6. Personalize the routine to their calorie/protein/carb/fat targets, weekly loss rate, gym days, current body weight, goal weight, height, recovery capacity, equipment access, exercise likes/dislikes, injuries, and ideal physique focus.
-7. Avoid lazy workouts. Every day should have enough high-quality hard sets, clear compounds, useful accessories, and a reason it exists.
-8. If the user ate too many calories or asks how to make up calories, suggest realistic add-on cardio or conditioning based on the extra calories, their current cardio burn, recovery, and whether they already lifted. Do not suggest excessive punishment workouts. Preserve muscle and recovery.
-9. If the user asks to change one exercise, backup, equipment option, day, or constraint in the current routine, use CURRENT ROUTINE JSON as the source of truth. Make the smallest useful change, preserve all unaffected workout days/exercises/sets/reps/cardio/backups exactly as much as possible, and return the full updated routine JSON so the app can replace the current routine without losing anything.
+DEFAULT BEHAVIOR:
+1. Talk to the user about their current plan and results. Answer whether they are on track, what to improve, and what to watch.
+2. Do NOT generate a brand-new routine or change the full split unless the user explicitly asks to "change split", "switch split", "rebuild", or "replace my routine".
+3. If the user asks to change split or rebuild, interview them like the intake flow first: goals, weekly lift days, fixed/irregular schedule, equipment, limitations, priorities, and exercises they want to keep. Do not output JSON until they explicitly say they are ready to build/save the replacement.
+4. If the user asks to swap ONE exercise, backup, equipment option, day, or constraint, use CURRENT ROUTINE JSON as source of truth. Make the smallest useful change and preserve all unaffected workout days/exercises/sets/reps/cardio/backups as much as possible. Return the full updated routine JSON only for that saveable edit.
+5. If the user asks how to do an exercise, explain setup, form cues, common mistakes, and include a YouTube search link like https://www.youtube.com/results?search_query=bench+press+proper+form. Do not output workout JSON for form help.
+6. If reviewing the plan, evaluate chest, back, shoulders, quads, hamstrings/glutes, calves, biceps, triceps, core, progression, recovery, missed-workout backups, and cardio. Give concise, practical recommendations. Do not output JSON for plain review.
+7. If the user asks whether results are on track, use the day context, macro targets, weight goal, weekly pace, and routine. Be honest about likely bottlenecks.
+8. If calories are high or they ask how to make up calories, suggest realistic cardio/conditioning without punishment. Preserve recovery.
 
-When you generate a savable routine, include this exact JSON format inside a \`\`\`json code block. Do not rename "workouts" or the app cannot import it:
+ONLY when generating a saveable exercise edit or explicitly approved replacement routine, include this exact JSON format inside a \`\`\`json code block. Do not rename "workouts" or the app cannot import it:
 {
   "summary": "why this routine fits the user's profile, calorie intake, weight loss rate, and physique goal",
   "physiqueFocus": "specific physique emphasis, for example broad shoulders, upper chest, back width, arms, lean waist, glutes/legs",
@@ -425,14 +421,17 @@ When you generate a savable routine, include this exact JSON format inside a \`\
           "maxReps": 8,
           "weight": 0,
           "lastReps": [0, 0, 0, 0],
-          "backup": "Dumbbell press or push-ups"
+          "lastWeights": [0, 0, 0, 0],
+          "backup": "Dumbbell press or push-ups",
+          "backupOptions": ["Dumbbell press", "Machine chest press", "Push-ups"],
+          "selectedBackup": "Dumbbell press"
         }
       ]
     }
   ]
 }
 
-Use 0 for starting weights unless the user gives known working weights or the current routine already has weights. When editing an existing routine, preserve current weights and lastReps unless the changed exercise makes them invalid. Keep ids short lowercase strings. Keep lastReps length equal to sets. Make clear the user can reject exercises after the draft and ask for substitutions before tapping Save as My Routine. Be direct and specific. Avoid vague motivational advice.`;
+When editing an existing routine, preserve current weights, lastReps, lastWeights, backups, exercise order, day order, and cardio unless the changed exercise makes them invalid. Keep ids short lowercase strings. Be direct and specific. Avoid vague motivational advice.`;
 }
 
 export async function sendChatMessage(
@@ -490,13 +489,13 @@ export async function sendChatMessage(
 
 export function parseMealPlanFromResponse(response: string): MealPlanResponse | null {
   try {
-    const parsed = parseFirstJsonObject(response);
-    const mealsSource = Array.isArray(parsed)
-      ? parsed
-      : parsed.meals ?? parsed.mealPlan ?? parsed.meal_plan ?? parsed.mealOptions ?? parsed.meal_options ?? parsed.options ?? parsed.foods;
-
-    if (mealsSource && Array.isArray(mealsSource)) {
-      const meals = mealsSource.map((meal: any, index: number) => {
+    const parsedObjects = parseJsonCandidates(response);
+    const meals = parsedObjects.flatMap((parsed) => {
+      const mealsSource = Array.isArray(parsed)
+        ? parsed
+        : parsed.meals ?? parsed.mealPlan ?? parsed.meal_plan ?? parsed.mealOptions ?? parsed.meal_options ?? parsed.options ?? parsed.foods;
+      if (!mealsSource || !Array.isArray(mealsSource)) return [];
+      return mealsSource.map((meal: any, index: number) => {
         const calories = Number(meal.calories ?? meal.cals ?? meal.kcal ?? 0) || 0;
         const protein = Number(meal.protein ?? meal.proteinGrams ?? meal.protein_g ?? 0) || 0;
         const ingredients = formatStringList(meal.ingredients ?? meal.ingredientList);
@@ -519,12 +518,15 @@ export function parseMealPlanFromResponse(response: string): MealPlanResponse | 
           instructions,
         };
       });
+    });
+    if (meals.length) {
+      const first = parsedObjects.find(parsed => !Array.isArray(parsed)) ?? {};
       return {
         meals,
-        summary: parsed.summary || 'Personalized meal plan created',
-        totalCalories: parsed.totalCalories || meals.reduce((total: number, meal: any) => total + meal.calories, 0),
-        totalProtein: parsed.totalProtein || meals.reduce((total: number, meal: any) => total + meal.protein, 0),
-        recommendations: parsed.recommendations || [],
+        summary: first.summary || 'Personalized meal plan created',
+        totalCalories: first.totalCalories || meals.reduce((total: number, meal: any) => total + meal.calories, 0),
+        totalProtein: first.totalProtein || meals.reduce((total: number, meal: any) => total + meal.protein, 0),
+        recommendations: first.recommendations || [],
       };
     }
   } catch (e) {
@@ -535,11 +537,13 @@ export function parseMealPlanFromResponse(response: string): MealPlanResponse | 
 
 export function parseWorkoutRoutineFromResponse(response: string): WorkoutRoutineResponse | null {
   try {
-    const parsed = parseFirstJsonObject(response);
-    const workoutSource = parsed.workouts ?? parsed.routine ?? parsed.days ?? parsed.weeklyPlan ?? parsed.weekly_plan ?? parsed.plan;
-    if (!workoutSource || !Array.isArray(workoutSource)) return null;
-
-    const workouts = workoutSource.map((workout: any, workoutIndex: number) => {
+    const parsedObjects = parseJsonCandidates(response);
+    const workouts = parsedObjects.flatMap((parsed) => {
+      const workoutSource = Array.isArray(parsed)
+        ? parsed
+        : parsed.workouts ?? parsed.routine ?? parsed.days ?? parsed.weeklyPlan ?? parsed.weekly_plan ?? parsed.plan;
+      if (!workoutSource || !Array.isArray(workoutSource)) return [];
+      return workoutSource.map((workout: any, workoutIndex: number) => {
       const exercises = Array.isArray(workout.exercises) ? workout.exercises : Array.isArray(workout.movements) ? workout.movements : [];
       return {
         id: String(workout.id || `ai-day-${workoutIndex + 1}`).toLowerCase().replace(/[^a-z0-9-]/g, '-'),
@@ -560,20 +564,25 @@ export function parseWorkoutRoutineFromResponse(response: string): WorkoutRoutin
             maxReps: Number.isFinite(Number(exercise.maxReps)) ? Number(exercise.maxReps) : 12,
             weight: Number.isFinite(Number(exercise.weight)) ? Number(exercise.weight) : 0,
             lastReps,
-            backup: String(exercise.backup || 'Use the closest available machine, cable, dumbbell, or bodyweight alternative.'),
+            lastWeights: Array.isArray(exercise.lastWeights) ? exercise.lastWeights.map((weight: any) => Number(weight) || 0) : Array.from({ length: sets }).map(() => Number(exercise.weight) || 0),
+            backup: String(exercise.selectedBackup || exercise.backup || 'Use the closest available machine, cable, dumbbell, or bodyweight alternative.'),
+            backupOptions: Array.isArray(exercise.backupOptions) ? exercise.backupOptions.map(String) : [String(exercise.backup || 'Dumbbell equivalent'), 'Machine equivalent', 'Bodyweight equivalent'],
+            selectedBackup: String(exercise.selectedBackup || exercise.backup || 'Dumbbell equivalent'),
           };
         }),
       };
+      });
     }).filter((workout: any) => workout.exercises.length > 0);
 
     if (workouts.length === 0) return null;
+    const first = parsedObjects.find(parsed => !Array.isArray(parsed)) ?? {};
 
     return {
-      summary: String(parsed.summary || 'Personalized workout routine created.'),
-      physiqueFocus: String(parsed.physiqueFocus || 'Balanced muscle retention and physique development.'),
-      weeklySchedule: Array.isArray(parsed.weeklySchedule) ? parsed.weeklySchedule.map(String) : [],
-      progressionRules: Array.isArray(parsed.progressionRules) ? parsed.progressionRules.map(String) : [],
-      recoveryNotes: Array.isArray(parsed.recoveryNotes) ? parsed.recoveryNotes.map(String) : [],
+      summary: String(first.summary || 'Personalized workout routine created.'),
+      physiqueFocus: String(first.physiqueFocus || 'Balanced muscle retention and physique development.'),
+      weeklySchedule: Array.isArray(first.weeklySchedule) ? first.weeklySchedule.map(String) : [],
+      progressionRules: Array.isArray(first.progressionRules) ? first.progressionRules.map(String) : [],
+      recoveryNotes: Array.isArray(first.recoveryNotes) ? first.recoveryNotes.map(String) : [],
       workouts,
     };
   } catch (e) {
@@ -582,29 +591,29 @@ export function parseWorkoutRoutineFromResponse(response: string): WorkoutRoutin
   return null;
 }
 
-function parseFirstJsonObject(response: string): any {
+function parseJsonCandidates(response: string): any[] {
   const blocks = [...response.matchAll(/```(?:json)?\n?([\s\S]*?)\n?```/g)].map(match => match[1]);
-  const candidates = blocks.length > 0 ? blocks : [response];
+  const parsed: any[] = [];
 
-  for (const candidate of candidates) {
+  for (const candidate of [response, ...blocks]) {
     try {
-      return JSON.parse(candidate.trim());
+      parsed.push(JSON.parse(candidate.trim()));
     } catch {}
   }
 
-  const firstObject = response.indexOf('{');
-  const lastObject = response.lastIndexOf('}');
-  if (firstObject >= 0 && lastObject > firstObject) {
-    return JSON.parse(response.slice(firstObject, lastObject + 1));
+  const starts = [...response].map((char, index) => (char === '{' || char === '[' ? index : -1)).filter(index => index >= 0);
+  for (const start of starts) {
+    for (let end = response.length; end > start; end--) {
+      const slice = response.slice(start, end).trim();
+      if (!slice.endsWith('}') && !slice.endsWith(']')) continue;
+      try {
+        parsed.push(JSON.parse(slice));
+        break;
+      } catch {}
+    }
   }
 
-  const firstArray = response.indexOf('[');
-  const lastArray = response.lastIndexOf(']');
-  if (firstArray >= 0 && lastArray > firstArray) {
-    return JSON.parse(response.slice(firstArray, lastArray + 1));
-  }
-
-  throw new Error('No JSON found');
+  return parsed;
 }
 
 function normalizeMealType(value: any): 'Breakfast' | 'Lunch' | 'Dinner' | 'Snack' {
