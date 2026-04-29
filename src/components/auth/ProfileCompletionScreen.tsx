@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getCurrentSession, signOut } from '../../services/authService';
@@ -9,6 +9,14 @@ export function ProfileCompletionScreen({ onComplete }: { onComplete: (profile: 
   const [displayName, setDisplayName] = useState('');
   const [username, setUsername] = useState('');
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    getCurrentSession().then(session => {
+      const metadata = session?.user.user_metadata ?? {};
+      setDisplayName(current => current || metadata.display_name || '');
+      setUsername(current => current || metadata.username || '');
+    }).catch(() => {});
+  }, []);
 
   const submit = async () => {
     try {

@@ -10,6 +10,7 @@ import { IntakeActivityPreset, IntakeGeneratedPlan, IntakeWorkoutDay, PlanReview
 
 type IntakeFlowProps = {
   onComplete: (profile: any) => void;
+  initialName?: string;
 };
 
 type Sex = 'male' | 'female';
@@ -148,11 +149,14 @@ const phases = [
   'Save',
 ];
 
-export function IntakeFlow({ onComplete }: IntakeFlowProps) {
+export function IntakeFlow({ onComplete, initialName }: IntakeFlowProps) {
   const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView>(null);
   const [phase, setPhase] = useState(0);
-  const [state, setState] = useState<IntakeState>(initialState);
+  const [state, setState] = useState<IntakeState>(() => ({
+    ...initialState,
+    name: initialName?.trim() || initialState.name,
+  }));
   const [plan, setPlan] = useState<IntakeGeneratedPlan | null>(null);
   const [answered, setAnswered] = useState<Record<number, boolean>>({ 0: true, 1: true });
 

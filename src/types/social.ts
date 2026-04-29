@@ -6,6 +6,7 @@ export type UserProfile = {
   avatarUrl?: string;
   bio?: string;
   isPrivate: boolean;
+  appState?: any;
   createdAt: string;
   updatedAt: string;
 };

@@ -3,6 +3,7 @@ import { requireSupabase } from './supabaseClient';
 import { UserProfile } from '../types/social';
 
 const usernameRegex = /^[a-z0-9._]{3,24}$/;
+const publicProfileSelect = 'id,username,display_name,avatar_url,bio,is_private,created_at,updated_at';
 
 function fromProfileRow(row: any): UserProfile {
   return {
@@ -85,7 +86,7 @@ export async function searchPublicProfiles(query: string) {
   if (term.length < 2) return [];
   const { data, error } = await client
     .from('profiles')
-    .select('*')
+    .select(publicProfileSelect)
     .eq('is_private', false)
     .or(`username.ilike.%${term}%,display_name.ilike.%${term}%`)
     .limit(25);
@@ -96,10 +97,37 @@ export async function searchPublicProfiles(query: string) {
 export async function getPublicProfileByUsername(usernameInput: string) {
   const client = requireSupabase();
   const username = validateUsername(usernameInput);
-  const { data, error } = await client.from('profiles').select('*').eq('username', username).maybeSingle();
+  const { data, error } = await client.from('profiles').select(publicProfileSelect).eq('username', username).maybeSingle();
   if (error) throw error;
   if (!data || data.is_private) return null;
   return fromProfileRow(data);
+}
+
+export async function getCloudAppState() {
+  const client = requireSupabase();
+  const profile = await getCurrentProfile();
+  if (!profile) return null;
+  const { data, error } = await client
+    .from('user_app_state')
+    .select('app_state')
+    .eq('user_id', profile.id)
+    .maybeSingle();
+  if (error) throw error;
+  return data?.app_state ?? null;
+}
+
+export async function upsertCloudAppState(appState: any) {
+  const client = requireSupabase();
+  const profile = await getCurrentProfile();
+  if (!profile) throw new Error('No profile found.');
+  const { error } = await client
+    .from('user_app_state')
+    .upsert({
+      user_id: profile.id,
+      app_state: appState,
+      updated_at: new Date().toISOString(),
+    });
+  if (error) throw error;
 }
 
 export async function uploadProfilePicture() {

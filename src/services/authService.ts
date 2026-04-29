@@ -1,6 +1,6 @@
 import { Session } from '@supabase/supabase-js';
 import { requireSupabase, supabase } from './supabaseClient';
-import { createProfileAfterSignup, validateUsername } from './profileService';
+import { validateUsername } from './profileService';
 
 export async function getCurrentSession(): Promise<Session | null> {
   if (!supabase) return null;
@@ -24,15 +24,15 @@ export async function signUpWithProfile(input: { email: string; password: string
   const { data, error } = await client.auth.signUp({
     email: input.email.trim(),
     password: input.password,
+    options: {
+      data: {
+        display_name: input.displayName.trim(),
+        username,
+      },
+    },
   });
   if (error) throw error;
   if (!data.user) throw new Error('Signup succeeded but no user was returned.');
-  await createProfileAfterSignup({
-    id: data.user.id,
-    email: data.user.email ?? input.email.trim(),
-    username,
-    displayName: input.displayName.trim(),
-  });
   return data;
 }
 

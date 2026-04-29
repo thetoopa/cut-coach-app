@@ -25,7 +25,7 @@ import { UserSearchScreen } from './src/components/social/UserSearchScreen';
 import { calculateCardioPlan, calculateWaterPlan, WeeklyLossRate, calculateEffectiveCalorieGoal, calculateNutritionTargets, getProgressionRecommendation, suggestedRestSeconds, weeklyLossOptions } from './src/utils/calculations';
 import { parseMealJSON, parseWorkoutJSON } from './src/utils/exportImport';
 import { getCurrentSession, onAuthStateChange, signOut } from './src/services/authService';
-import { getCurrentProfile } from './src/services/profileService';
+import { getCloudAppState, getCurrentProfile, upsertCloudAppState } from './src/services/profileService';
 import { uploadMealToCommunity } from './src/services/communityMealService';
 import { isSupabaseConfigured } from './src/services/supabaseClient';
 import { UserProfile } from './src/types/social';
@@ -86,6 +86,17 @@ type Profile = {
 type DayLog = { date: string; weight?: number; calories: number; protein: number; outdoorWalk: number; inclineWalk: number; cardioBurnedCalories?: number; golfBurnedCalories?: number; otherBurnedCalories?: number; workoutBurnedCalories?: number; alcoholCalories?: number; golf: boolean; golfHoles?: number; golfMode?: 'riding'|'walking'; waterOz?: number; plannedLift?: boolean; drinking: boolean; drinks: number; workoutDone: boolean; selectedMeals: string[]; notes: string; workoutName?: string; workoutEntries?: WorkoutExerciseLog[] };
 type GroceryItem = { id: string; name: string; source: string; store: string; needed: boolean; bought: boolean };
 type WeightRange = 'Week' | 'Month' | 'Quarter' | 'Year' | 'All' | 'Custom';
+type CloudAppStateSnapshot = {
+  version: number;
+  profile: Profile;
+  log: DayLog;
+  workouts: WorkoutDay[];
+  dayLogs: Record<string, DayLog>;
+  meals: Meal[];
+  groceryItems: GroceryItem[];
+  selectedStores: string[];
+  savedAt: string;
+};
 
 const todayKey = () => {
   const date = new Date();
@@ -103,6 +114,36 @@ const RESET_LOCAL_DATA_ON_START = process.env.EXPO_PUBLIC_RESET_LOCAL_DATA === '
 const DRINK_CALORIES = 115;
 
 const defaultProfile: Profile = { name: 'Cooper', goal: 'cut', age: 24, sex: 'male', heightIn: 69, weight: 170, goalWeight: 155, activity: 1.5, aggression: 500, proteinGoal: 170, calorieGoal: 1900, carbGoal: 145, fatGoal: 71, weeklyLossRate: 1, gymDaysPerWeek: 4 };
+const defaultDayLog = (date = todayKey()): DayLog => ({
+  date,
+  calories: 0,
+  protein: 0,
+  outdoorWalk: 0,
+  inclineWalk: 0,
+  cardioBurnedCalories: undefined,
+  golfBurnedCalories: undefined,
+  otherBurnedCalories: 0,
+  workoutBurnedCalories: undefined,
+  alcoholCalories: undefined,
+  golf: false,
+  golfHoles: 18,
+  golfMode: 'riding',
+  waterOz: 0,
+  plannedLift: true,
+  drinking: false,
+  drinks: 0,
+  workoutDone: false,
+  selectedMeals: [],
+  notes: '',
+});
+const hasCompletedCalosIntake = (loadedProfile?: Partial<Profile> | null) => !!(
+  loadedProfile?.name &&
+  loadedProfile?.weight &&
+  loadedProfile?.calorieGoal &&
+  loadedProfile?.programTemplate?.workouts?.length &&
+  loadedProfile?.nutritionPlan &&
+  loadedProfile?.cardioPlan
+);
 
 const meals: Meal[] = [
   { id:'shake', type:'Breakfast', name:'Legion Plant+ Cinnamon Shake', calories:390, protein:48, carbs:35, fat:6, notes:'2 scoops Legion Plant+ + banana + unsweet almond milk/water.' },
@@ -496,7 +537,9 @@ function AppInner(){
   const [isLoadingCloud, setIsLoadingCloud] = useState(true);
   const [cloudSession, setCloudSession] = useState<any | null>(null);
   const [cloudProfile, setCloudProfile] = useState<UserProfile | null>(null);
-  const [cloudLocalOnly, setCloudLocalOnly] = useState(!isSupabaseConfigured);
+  const [cloudProfileChecked, setCloudProfileChecked] = useState(false);
+  const [cloudLocalOnly, setCloudLocalOnly] = useState(false);
+  const [isCompletingCloudProfile, setIsCompletingCloudProfile] = useState(false);
   const [showSplash, setShowSplash] = useState(true);
   const [mealsState, setMealsState] = useState<Meal[]>(meals);
   const [log,setLog]=useState<DayLog>({date:todayKey(), calories:0, protein:0, outdoorWalk:0, inclineWalk:0, golf:false, golfHoles:18, golfMode:'riding', waterOz:0, drinking:false, drinks:0, workoutDone:false, selectedMeals:[], notes:''});
@@ -553,6 +596,34 @@ function AppInner(){
     : log.workoutDone
       ? `Lift completed. Added ${effectiveCalories.workoutCredit} workout calories to today's food target.`
       : `Lift planned but not completed yet. Base target is active. Mark done to add about ${effectiveCalories.workoutCalories} workout calories.`;
+
+  function buildCloudSnapshot(): CloudAppStateSnapshot {
+    return {
+      version: 1,
+      profile,
+      log,
+      workouts,
+      dayLogs,
+      meals: mealsState,
+      groceryItems,
+      selectedStores,
+      savedAt: new Date().toISOString(),
+    };
+  }
+
+  function applyCloudSnapshot(snapshot?: Partial<CloudAppStateSnapshot> | null) {
+    if (!snapshot?.profile) return;
+    const nextProfile = snapshot.profile as Profile;
+    const nextLog = snapshot.log?.date === todayKey() ? snapshot.log : defaultDayLog(todayKey());
+    setProfile(nextProfile);
+    setLog(nextLog);
+    setWorkouts(snapshot.workouts ?? baseWorkouts);
+    setDayLogs(snapshot.dayLogs ?? {});
+    setMealsState(snapshot.meals ?? meals);
+    setGroceryItems(snapshot.groceryItems ?? []);
+    setSelectedStores(snapshot.selectedStores ?? ['Costco', 'Trader Joe’s']);
+    setHasSeenOnboarding(hasCompletedCalosIntake(nextProfile));
+  }
 
   function toggleMeal(id:string){ setLog(l=>({...l, selectedMeals: l.selectedMeals.includes(id) ? l.selectedMeals.filter(x=>x!==id) : [...l.selectedMeals,id]})); }
   function toggleMealRecipe(id:string){ setExpandedMeals(current=>({...current,[id]:!current[id]})); }
@@ -647,21 +718,14 @@ function AppInner(){
         const v = JSON.parse(raw);
         const loadedProfile = v.profile ?? defaultProfile;
         setProfile(loadedProfile);
-        setLog(v.log?.date === todayKey() ? v.log : { ...log, date: todayKey() });
+        setLog(v.log?.date === todayKey() ? v.log : defaultDayLog(todayKey()));
         setWorkouts(v.workouts ?? baseWorkouts);
         setDayLogs(v.dayLogs ?? {});
         setMealsState(v.meals ?? meals);
         setGroceryItems(v.groceryItems ?? []);
         setSelectedStores(v.selectedStores ?? ['Costco', 'Trader Joe’s']);
         // Require the new Calos intake system to be completed before the app can bypass onboarding.
-        setHasSeenOnboarding(!!(
-          loadedProfile.name &&
-          loadedProfile.weight &&
-          loadedProfile.calorieGoal &&
-          loadedProfile.programTemplate?.workouts?.length &&
-          loadedProfile.nutritionPlan &&
-          loadedProfile.cardioPlan
-        ));
+        setHasSeenOnboarding(hasCompletedCalosIntake(loadedProfile));
       } else {
         // First time - no saved data
         setHasSeenOnboarding(false);
@@ -672,6 +736,7 @@ function AppInner(){
 
   useEffect(() => {
     if (cloudLocalOnly || !isSupabaseConfigured) {
+      setCloudProfileChecked(true);
       setIsLoadingCloud(false);
       return;
     }
@@ -680,24 +745,40 @@ function AppInner(){
       try {
         const session = await getCurrentSession();
         if (!mounted) return;
+        const nextCloudProfile = session ? await getCurrentProfile() : null;
+        const cloudAppState = nextCloudProfile ? await getCloudAppState().catch(() => null) : null;
         setCloudSession(session);
-        setCloudProfile(session ? await getCurrentProfile() : null);
+        setCloudProfile(nextCloudProfile);
+        if (cloudAppState) applyCloudSnapshot(cloudAppState);
+        setCloudProfileChecked(true);
       } catch (error: any) {
         Alert.alert('Cloud unavailable', error?.message ?? 'Calos will keep working locally.');
+        setCloudProfileChecked(true);
       } finally {
         if (mounted) setIsLoadingCloud(false);
       }
     };
     loadCloud();
     const subscription = onAuthStateChange(async (session) => {
-      setCloudSession(session);
-      setCloudProfile(session ? await getCurrentProfile().catch(() => null) : null);
+      if (isCompletingCloudProfile) return;
+      setIsLoadingCloud(true);
+      setCloudProfileChecked(false);
+      try {
+        const nextCloudProfile = session ? await getCurrentProfile().catch(() => null) : null;
+        const cloudAppState = nextCloudProfile ? await getCloudAppState().catch(() => null) : null;
+        setCloudSession(session);
+        setCloudProfile(nextCloudProfile);
+        if (cloudAppState) applyCloudSnapshot(cloudAppState);
+        setCloudProfileChecked(true);
+      } finally {
+        setIsLoadingCloud(false);
+      }
     });
     return () => {
       mounted = false;
       subscription.unsubscribe();
     };
-  }, [cloudLocalOnly]);
+  }, [cloudLocalOnly, isCompletingCloudProfile]);
 
   // Auto-save whenever profile changes
   useEffect(() => {
@@ -709,9 +790,18 @@ function AppInner(){
 
   useEffect(() => {
     if (!isLoadingProfile) {
-      AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ profile, log, workouts, dayLogs, meals: mealsState, groceryItems, selectedStores }));
+      const snapshot = buildCloudSnapshot();
+      AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
+      if (!cloudLocalOnly && cloudProfile && isSupabaseConfigured) {
+        const timeout = setTimeout(() => {
+          upsertCloudAppState(snapshot).catch(error => {
+            console.warn('Cloud app-state save failed', error?.message ?? error);
+          });
+        }, 1200);
+        return () => clearTimeout(timeout);
+      }
     }
-  }, [profile, log, workouts, dayLogs, mealsState, groceryItems, selectedStores, isLoadingProfile]);
+  }, [profile, log, workouts, dayLogs, mealsState, groceryItems, selectedStores, isLoadingProfile, cloudProfile?.id, cloudLocalOnly]);
 
   useEffect(() => {
     if (!isLoadingProfile && log.date === todayKey()) {
@@ -760,7 +850,7 @@ function AppInner(){
   const resetLocalData = async () => {
     await AsyncStorage.multiRemove([STORAGE_KEY, LEGACY_STORAGE_KEY]);
     setProfile(defaultProfile);
-    setLog({date:todayKey(), calories:0, protein:0, outdoorWalk:0, inclineWalk:0, cardioBurnedCalories:undefined, golfBurnedCalories:undefined, otherBurnedCalories:0, workoutBurnedCalories:undefined, alcoholCalories:undefined, golf:false, golfHoles:18, golfMode:'riding', waterOz:0, plannedLift:true, drinking:false, drinks:0, workoutDone:false, selectedMeals:[], notes:''});
+    setLog(defaultDayLog(todayKey()));
     setWorkouts(baseWorkouts);
     setDayLogs({});
     setMealsState(meals);
@@ -967,19 +1057,41 @@ function AppInner(){
 
   if (!cloudLocalOnly && !cloudSession) {
     return <AuthScreen onAuthenticated={async () => {
-      const session = await getCurrentSession();
-      setCloudSession(session);
-      setCloudProfile(session ? await getCurrentProfile().catch(() => null) : null);
+      setIsLoadingCloud(true);
+      setCloudProfileChecked(false);
+      try {
+        const session = await getCurrentSession();
+        const nextCloudProfile = session ? await getCurrentProfile().catch(() => null) : null;
+        const cloudAppState = nextCloudProfile ? await getCloudAppState().catch(() => null) : null;
+        setCloudSession(session);
+        setCloudProfile(nextCloudProfile);
+        if (cloudAppState) applyCloudSnapshot(cloudAppState);
+        setCloudProfileChecked(true);
+      } finally {
+        setIsLoadingCloud(false);
+      }
     }} onSkipCloud={() => setCloudLocalOnly(true)} />;
   }
 
-  if (!cloudLocalOnly && cloudSession && !cloudProfile) {
-    return <ProfileCompletionScreen onComplete={setCloudProfile} />;
+  if (!cloudLocalOnly && cloudSession && !cloudProfileChecked) {
+    return <View style={{flex: 1, backgroundColor: '#111827', justifyContent: 'center', alignItems: 'center'}}><Text style={{color: '#cbd5e1', fontSize: 16}}>Checking Calos profile...</Text></View>;
+  }
+
+  if (!cloudLocalOnly && cloudSession && cloudProfileChecked && !cloudProfile) {
+    if (!isCompletingCloudProfile) {
+      setTimeout(() => setIsCompletingCloudProfile(true), 0);
+    }
+    return <ProfileCompletionScreen onComplete={(nextProfile) => {
+      setCloudProfile(nextProfile);
+      setCloudProfileChecked(true);
+      setIsCompletingCloudProfile(false);
+      setProfile(current => ({ ...current, name: nextProfile.displayName || current.name }));
+    }} />;
   }
 
   // Show onboarding if user hasn't completed it
   if (!hasSeenOnboarding) {
-    return <IntakeFlow onComplete={handleOnboardingComplete} />;
+    return <IntakeFlow initialName={cloudProfile?.displayName} onComplete={handleOnboardingComplete} />;
   }
 
   const secondaryTabs: MoreTab[] = ['Calendar', 'Grocery', 'Weight', 'Profile'];

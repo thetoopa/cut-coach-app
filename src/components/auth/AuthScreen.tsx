@@ -25,7 +25,12 @@ export function AuthScreen({ onAuthenticated, onSkipCloud }: { onAuthenticated: 
         const cleanUsername = validateUsername(username);
         const available = await checkUsernameAvailable(cleanUsername);
         if (!available) throw new Error('That username is already taken.');
-        await signUpWithProfile({ email, password, displayName, username: cleanUsername });
+        const data = await signUpWithProfile({ email, password, displayName, username: cleanUsername });
+        if (!data.session) {
+          Alert.alert('Account created', 'Check your email to confirm your account, then log in. Calos will finish your profile after you sign in.');
+          setMode('login');
+          return;
+        }
       } else {
         await signIn(email, password);
       }

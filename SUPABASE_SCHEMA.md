@@ -36,6 +36,12 @@ create table if not exists public.community_meals (
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
+
+create table if not exists public.user_app_state (
+  user_id uuid primary key references public.profiles(id) on delete cascade,
+  app_state jsonb not null default '{}'::jsonb,
+  updated_at timestamptz default now()
+);
 ```
 
 ## RLS
@@ -43,6 +49,7 @@ create table if not exists public.community_meals (
 ```sql
 alter table public.profiles enable row level security;
 alter table public.community_meals enable row level security;
+alter table public.user_app_state enable row level security;
 
 create policy "Read public profiles"
 on public.profiles for select
@@ -73,6 +80,19 @@ with check (auth.uid() = created_by_user_id);
 create policy "Delete own community meals"
 on public.community_meals for delete
 using (auth.uid() = created_by_user_id);
+
+create policy "Read own app state"
+on public.user_app_state for select
+using (auth.uid() = user_id);
+
+create policy "Insert own app state"
+on public.user_app_state for insert
+with check (auth.uid() = user_id);
+
+create policy "Update own app state"
+on public.user_app_state for update
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
 ```
 
 ## Avatars Bucket
@@ -106,3 +126,4 @@ using (
 - Profiles are public by default, but users can toggle private.
 - Community meals are public by default unless marked private.
 - Weight, calories, personal logs, workout logs, and future streak/PR sharing remain private unless explicitly made public later.
+- `user_app_state` stores the private Calos app snapshot (intake profile, workouts, meals, logs, grocery settings) and is readable/writable only by the signed-in user.
